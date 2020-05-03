@@ -7,7 +7,7 @@
 #include <SDL2/SDL_opengl.h>
 #include <GL/gl.h>
 #include "defs.h"
-//#include "printutils.h"
+#include "printutils.h"
 
 #include "cpu2ao3.h"
 
@@ -39,14 +39,15 @@ main() {
 
     assert(window);
     SDL_GLContext Context = SDL_GL_CreateContext(window);
+    (void) Context;
 
     int running = 1;
     SDL_Event event;
-    //LOG("All initialized");
-    //LOG_COLOR(CONSOLE_COLOR_GREEN ,"All initialized");
-    //LOG_COLOR(CONSOLE_COLOR_BLUE ,"All initialized");
-    //LOG("All initialized");
-
+    LOG("All initialized");
+    LOG_COLOR(CONSOLE_COLOR_GREEN ,"All initialized");
+    LOG_COLOR(CONSOLE_COLOR_BLUE ,"All initialized");
+    LOG("All initialized");
+    ABORT("EERRORR");
     while (running) {
 
         while (SDL_PollEvent(&event)) {

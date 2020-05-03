@@ -15,14 +15,25 @@
 u8 ram[0xFFFF];
 
 static u8
-bus_read(u16 addr) {
+bus_read8(u16 addr) {
     return ram[addr];
 }
 
 static void
-bus_write(u16 addr, u8 data) {
+bus_write8(u16 addr, u8 data) {
 
     ram[addr] = data;
+}
+
+static u16
+bus_read16(u16 addr) {
+    return ((u16*)ram)[addr];
+}
+
+static void
+bus_write16(u16 addr, u16 data) {
+
+    ((u16*)ram)[addr] = data;
 }
 
 #endif /* BUS_H */

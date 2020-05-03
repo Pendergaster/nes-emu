@@ -107,6 +107,23 @@ typedef enum Instructions {
     XXX // Unknown
 } Instructions ;
 
+// might need extra cycle according to
+// http://archive.6502.org/datasheets/rockwell_r65c00_microprocessors.pdf
+const u64 extraCycleFlags =
+((u64)1 << ADC) |
+((u64)1 << AND) |
+((u64)1 << EOR) |
+((u64)1 << LDA) |
+((u64)1 << LDX) |
+((u64)1 << LDY) |
+((u64)1 << ORA) |
+((u64)1 << SBC);
+// add CMP?
+
+static inline u8
+check_extra_cycle(Instructions opcode) {
+    return extraCycleFlags & ((u64)1 << opcode);
+}
 
 typedef struct cpu2ao3 {
     // reqisters
@@ -120,21 +137,37 @@ typedef struct cpu2ao3 {
     u16 pc;
 
     u8 stackPointer;
-    u8 cycleCounter;
+    u8 cycles;
 } cpu2ao3;
 
+// global cpu variable
+cpu2ao3 cpu;
 
-// Instructiuon, addressmode, cycles
+static inline void
+cpu_set_flag(CpuStatus flag,u8 cond) {
+    if(cond) {
+        cpu.flags |= flag;
+    } else {
+        cpu.flags &= ~flag;
+    }
+}
+
+static inline u8
+cpu_get_flag(CpuStatus flag) {
+    return   cpu.flags |= flag;
+}
+
+// Instruction, addressmode, cycles TODO clean unknown ones
 #define INSTRUCTION_TABLE(FN) \
     FN(BRK , IMM, 7) FN(ORA, INDX, 6) FN(XXX, IMP, 2) FN(XXX, IMP, 8) FN(NOP, IMP, 3) FN(ORA, ZPX, 3) FN(ASL, ZPX, 5) FN(XXX, IMP, 5) FN(PHP, IMP, 3) FN(ORA, IMM, 2) FN(ASL, IMP, 2) FN(XXX, IMP, 2) FN(NOP, IMP, 4) FN(ORA, ABS, 4) FN(ASL, ABS, 6) FN(XXX, IMP, 6) \
     \
     FN(BPL, REL, 2) FN(ORA, INDY, 5) FN(XXX, IMP, 2) FN(XXX, IMP, 8) FN(NOP, IMP, 4) FN(ORA, ZPX, 4) FN(ASL, ZPX, 6) FN(XXX, IMP, 6) FN(CLC, IMP, 2) FN(ORA, ABSY, 4) FN(NOP, IMP, 2) FN(XXX, IMP, 7) FN(NOP, IMP, 4) FN(ORA, ABSX, 4) FN(ASL, ABSX, 7) FN(XXX, IMP, 7) \
     \
-    FN(JSR, ABS, 6 ) FN(AND, INDX, 6 ) FN(XXX, IMP, 2 ) FN(XXX, IMP, 8 ) FN(BIT, ZP, 3 ) FN(AND, ZP, 3 ) FN(ROL, ZP, 5 ) FN(XXX, IMP, 5 ) FN(PLP, IMP, 4 ) FN(AND, IMM, 2 ) FN(ROL, IMP, 2 ) FN(XXX, IMP, 2 ) FN(BIT, ABS, 4 ) FN(AND, ABS, 4 ) FN(ROL, ABS, 6 ) FN(XXX, IMP, 6 ) \
+    FN(JSR, ABS, 6 ) FN(AND, INDX, 6 ) FN(XXX, IMP, 2 ) FN(XXX, IMP, 8 ) FN(BIT, ZP, 3 ) FN(AND, ZP, 3 ) FN(ROL, ZP, 5 ) FN(XXX, IMP, 5 ) FN(PLP, IMP, 4 ) FN(AND, IMM, 2 ) FN(ROL, ACCUM, 2 ) FN(XXX, IMP, 2 ) FN(BIT, ABS, 4 ) FN(AND, ABS, 4 ) FN(ROL, ABS, 6 ) FN(XXX, IMP, 6 ) \
     \
     FN(BMI, REL, 2 ) FN(AND, INDY, 5 ) FN(XXX, IMP, 2 ) FN(XXX, IMP, 8 ) FN(NOP, IMP, 4 ) FN(AND, ZPX, 4 ) FN(ROL, ZPX, 6 ) FN(XXX, IMP, 6 ) FN(SEC, IMP, 2 ) FN(AND, ABSY, 4 ) FN(NOP, IMP, 2 ) FN(XXX, IMP, 7 ) FN(NOP, IMP, 4 ) FN(AND, ABSX, 4 ) FN(ROL, ABSX, 7 ) FN(XXX, IMP, 7 ) \
     \
-    FN(RTI, IMP, 6 ) FN(EOR, INDX, 6 ) FN(XXX, IMP, 2 ) FN(XXX, IMP, 8 ) FN(NOP, IMP, 3 ) FN(EOR, ZP, 3 ) FN(LSR, ZP, 5 ) FN(XXX, IMP, 5 ) FN(PHA, IMP, 3 ) FN(EOR, IMM, 2 ) FN(LSR, IMP, 2 ) FN(XXX, IMP, 2 ) FN(JMP, ABS, 3 ) FN(EOR, ABS, 4 ) FN(LSR, ABS, 6 ) FN(XXX, IMP, 6 ) \
+    FN(RTI, IMP, 6 ) FN(EOR, INDX, 6 ) FN(XXX, IMP, 2 ) FN(XXX, IMP, 8 ) FN(NOP, IMP, 3 ) FN(EOR, ZP, 3 ) FN(LSR, ZP, 5 ) FN(XXX, IMP, 5 ) FN(PHA, IMP, 3 ) FN(EOR, IMM, 2 ) FN(LSR, ACCUM, 2 ) FN(XXX, IMP, 2 ) FN(JMP, ABS, 3 ) FN(EOR, ABS, 4 ) FN(LSR, ABS, 6 ) FN(XXX, IMP, 6 ) \
     \
     FN(BVC, REL, 2 ) FN(EOR, INDY, 5 ) FN(XXX, IMP, 2 ) FN(XXX, IMP, 8 ) FN(NOP, IMP, 4 ) FN(EOR, ZPX, 4 ) FN(LSR, ZPX, 6 ) FN(XXX, IMP, 6 ) FN(CLI, IMP, 2 ) FN(EOR, ABSY, 4 ) FN(NOP, IMP, 2 ) FN(XXX, IMP, 7 ) FN(NOP, IMP, 4 ) FN(EOR, ABSX, 4 ) FN(LSR, ABSX, 7 ) FN(XXX, IMP, 7 ) \
     \
@@ -158,12 +191,12 @@ typedef struct cpu2ao3 {
     \
     FN(BEQ, REL, 2 ) FN(SBC, INDY, 5 ) FN(XXX, IMP, 2 ) FN(XXX, IMP, 8 ) FN(NOP, IMP, 4 ) FN(SBC, ZPX, 4 ) FN(INC, ZPX, 6 ) FN(XXX, IMP, 6 ) FN(SED, IMP, 2 ) FN(SBC, ABSY, 4 ) FN(NOP, IMP, 2 ) FN(XXX, IMP, 7 ) FN(NOP, IMP, 4 ) FN(SBC, ABSX, 4 ) FN(INC, ABSX, 7 ) FN(XXX, IMP, 7 ) \
 
-
 typedef struct Instruction {
     u8 instructionCode;
     u8 addressMode;
     u8 cycles;
 } Instruction;
+
 
 #define CREATE_INSTRUCTION_TABLE(IN, ADDR, CYCLE) { .instructionCode = IN, .addressMode = ADDR, .cycles = CYCLE },
 
@@ -171,25 +204,390 @@ Instruction instructionTable[] = {
     INSTRUCTION_TABLE(CREATE_INSTRUCTION_TABLE)
 };
 
-// global cpu variable
-cpu2ao3 cpu;
-
 static void
 cpu_init() {
 
 }
 
+
+#define FETCH do{                                                       \
+    if(instruct.addressMode != IMP && instruct.addressMode != ACCUM)    \
+    fetched = bus_read8(addr);                                          \
+} while(0)                                                              \
+
 static void
 cpu_clock() {
 
     // execute the intruction
-    if(cpu.cycleCounter == 0) {
-        u16 opcode = bus_read(cpu.pc);
+    if(cpu.cycles == 0) {
+        u8 opcode = bus_read8(cpu.pc);
+        cpu.pc += 1;
 
-        // switch(opcode) {
-        // case
-        // }
+        Instruction instruct = instructionTable[opcode];
+        cpu.cycles = instruct.cycles;
+
+        u16 addr = 0;
+        u8 fetched = 0;
+        // fetch required data
+        switch(instruct.addressMode) {
+            // http://www.emulator101.com/6502-addressing-modes.html
+            // first two are bit cryptic bit ACCUM might be accumulator address
+            // and https://github.com/OneLoneCoder/olcNES/blob/master/Part%232%20-%20CPU/olc6502.cpp
+            // used IMP as ACCUM equilevant
+            case IMP:
+                {
+                    fetched = cpu.accumReq;
+                } break;
+            case ACCUM:
+                {
+                    fetched = cpu.accumReq;
+                    break;
+                } break;
+            case IMM:
+                {
+                    addr = cpu.pc;
+                    cpu.pc++;
+                } break;
+            case ZP: // zero page addressing
+                {
+                    addr = bus_read8(cpu.pc);
+                    cpu.pc += 1;
+                } break;
+            case ZPX: // zero page addressing with x
+                {
+                    addr = (bus_read8(cpu.pc) + cpu.Xreq) % 256;
+                    cpu.pc += 1;
+                } break;
+            case ZPY: // zero page addressing with y
+                {
+                    addr = (bus_read8(cpu.pc) + cpu.Yreq) % 256;
+                    cpu.pc += 1;
+                } break;
+            case REL: // Branch instructions (e.g. BEQ, BCS) have a relative addressing mode
+                // that specifies an 8-bit signed offset relative to the current PC.
+                {
+                    addr += (i8)bus_read8(cpu.pc); //TODO might be incorrect
+                }
+                break;
+            case ABS:
+                {
+                    addr = bus_read16(cpu.pc);
+                    cpu.pc += 2;
+                } break;
+            case ABSX:
+                {
+                    addr = (bus_read16(cpu.pc));
+                    cpu.pc += 2;
+
+                    // implement the oops cycle on page change
+                    // https://wiki.nesdev.com/w/index.php/CPU_addressing_modes
+                    u16 temp = addr + cpu.Xreq;
+                    if( check_extra_cycle(instruct.instructionCode ) &&
+                            ((addr & 0xFF00) != (temp & 0xFF00))) {
+                        cpu.cycles += 1;
+                    }
+                    addr = temp;
+                } break;
+            case ABSY:
+                {
+                    addr = (bus_read16(cpu.pc));
+                    cpu.pc += 2;
+
+                    // implement the oops cycle on page change
+                    // https://wiki.nesdev.com/w/index.php/CPU_addressing_modes
+                    u16 temp = addr + cpu.Yreq;
+                    if( check_extra_cycle(instruct.instructionCode ) &&
+                            ((addr & 0xFF00) != (temp & 0xFF00)) ) {
+                        cpu.cycles += 1;
+                    }
+                    addr = temp;
+                } break;
+            case IND:  //  The JMP instruction has a special indirect addressing mode that can
+                // jump to the address stored in a 16-bit pointer anywhere in memory.
+                // this contains bug http://forum.6502.org/viewtopic.php?t=770
+                {
+                    u16 ptr = bus_read16(cpu.pc);
+
+                    if ((ptr & 0x00FF) == 0x00FF) {// Simulate page boundary hardware bug
+                        ((u8*)&ptr)[1] = bus_read8(cpu.pc & 0xFF); // read pages start to higher byte
+                    }
+                    addr = bus_read16(ptr);
+                    cpu.pc += 2;
+                } break;
+            case INDX: // indirect zero page addressing with x
+                {
+                    u16 ptr = (u16)bus_read8(cpu.pc);
+
+                    u16 low = bus_read8((ptr + cpu.Xreq) % 256) << 8;
+                    u16 high = bus_read8((ptr + cpu.Xreq + 1) % 256);
+
+                    addr = low | high;
+
+                    cpu.pc += 1;
+                } break;
+            case INDY: // indirect zero page addressing with y
+                {
+                    u16 ptr = (u16)bus_read8(cpu.pc);
+
+                    u16 low = bus_read8(ptr % 256) << 8;
+                    u16 high = bus_read8((ptr + 1) % 256);
+
+                    u16 temp = (low | (high << 8)) + cpu.Yreq;
+                    addr = (low | (high << 8)) + cpu.Yreq;
+
+                    // implement the oops cycle on page change
+                    // https://wiki.nesdev.com/w/index.php/CPU_addressing_modes
+                    if( check_extra_cycle(instruct.instructionCode ) &&
+                            ((addr & 0xFF00) != (temp & 0xFF00)) ) {
+                        cpu.cycles += 1;
+                    }
+                    cpu.pc += 1;
+                } break;
+            default:
+                ABORT("Error addressing mode");
+        }
+
+
+        // perform the instruction (this is hopefully optimized to jumptable)
+        switch(instruct.instructionCode) {
+
+            case ADC: //add with carry
+                {
+                    printf("TODO\n");
+                } break;
+            case AND: //and (with accumulator)
+                {
+                    FETCH;
+                    cpu.accumReq &= fetched;
+                } break;
+            case ASL: //arithmetic shift left
+                {
+                    printf("TODO\n");
+                } break;
+            case BCC: //branch on carry clear
+                {
+                    printf("TODO\n");
+                } break;
+            case BCS: //branch on carry set
+                {
+                    printf("TODO\n");
+                } break;
+            case BEQ: //branch on equal (zero set)
+                {
+                    printf("TODO\n");
+                } break;
+            case BIT: //bit test
+                {
+                    printf("TODO\n");
+                } break;
+            case BMI: //branch on minus (negative set)
+                {
+                    printf("TODO\n");
+                } break;
+            case BNE: //branch on not equal (zero clear)
+                {
+                    printf("TODO\n");
+                } break;
+            case BPL: //branch on plus (negative clear)
+                {
+                    printf("TODO\n");
+                } break;
+            case BRK: //break / interrupt
+                {
+                    printf("TODO\n");
+                } break;
+            case BVC: //branch on overflow clear
+                {
+                    printf("TODO\n");
+                } break;
+            case BVS: //branch on overflow set
+                {
+                    printf("TODO\n");
+                } break;
+            case CLC: //clear carry
+                {
+                    printf("TODO\n");
+                } break;
+            case CLD: //clear decimal
+                {
+                    printf("TODO\n");
+                } break;
+            case CLI: //clear interrupt disable
+                {
+                    printf("TODO\n");
+                } break;
+            case CLV: //clear overflow
+                {
+                    printf("TODO\n");
+                } break;
+            case CMP: //compare (with accumulator)
+                {
+                    printf("TODO\n");
+                } break;
+            case CPX: //compare with X
+                {
+                    printf("TODO\n");
+                } break;
+            case CPY: //compare with Y
+                {
+                    printf("TODO\n");
+                } break;
+            case DEC: //decrement
+                {
+                    printf("TODO\n");
+                } break;
+            case DEX: //decrement X
+                {
+                    printf("TODO\n");
+                } break;
+            case DEY: //decrement Y
+                {
+                    printf("TODO\n");
+                } break;
+            case EOR: //exclusive or (with accumulator)
+                {
+                    printf("TODO\n");
+                } break;
+            case INC: //increment
+                {
+                    printf("TODO\n");
+                } break;
+            case INX: //increment X
+                {
+                    printf("TODO\n");
+                } break;
+            case INY: //increment Y
+                {
+                    printf("TODO\n");
+                } break;
+            case JMP: //jump
+                {
+                    printf("TODO\n");
+                } break;
+            case JSR: //jump subroutine
+                {
+                    printf("TODO\n");
+                } break;
+            case LDA: //load accumulator
+                {
+                    printf("TODO\n");
+                } break;
+            case LDX: //load X
+                {
+                    printf("TODO\n");
+                } break;
+            case LDY: //load Y
+                {
+                    printf("TODO\n");
+                } break;
+            case LSR: //logical shift right
+                {
+                    printf("TODO\n");
+                } break;
+            case NOP: //no operation
+                {
+                    printf("TODO\n");
+                } break;
+            case ORA: //or with accumulator
+                {
+                    printf("TODO\n");
+                } break;
+            case PHA: //push accumulator
+                {
+                    printf("TODO\n");
+                } break;
+            case PHP: //push processor status (SR)
+                {
+                    printf("TODO\n");
+                } break;
+            case PLA: //pull accumulator
+                {
+                    printf("TODO\n");
+                } break;
+            case PLP: //pull processor status (SR)
+                {
+                    printf("TODO\n");
+                } break;
+            case ROL: //rotate left
+                {
+                    printf("TODO\n");
+                } break;
+            case ROR: //rotate right
+                {
+                    printf("TODO\n");
+                } break;
+            case RTI: //return from interrupt
+                {
+                    printf("TODO\n");
+                } break;
+            case RTS: //return from subroutine
+                {
+                    printf("TODO\n");
+                } break;
+            case SBC: //subtract with carry
+                {
+                    printf("TODO\n");
+                } break;
+            case SEC: //set carry
+                {
+                    printf("TODO\n");
+                } break;
+            case SED: //set decimal
+                {
+                    printf("TODO\n");
+                } break;
+            case SEI: //set interrupt disable
+                {
+                    printf("TODO\n");
+                } break;
+            case STA: //store accumulator
+                {
+                    printf("TODO\n");
+                } break;
+            case STX: //store X
+                {
+                    printf("TODO\n");
+                } break;
+            case STY: //store Y
+                {
+                    printf("TODO\n");
+                } break;
+            case TAX: //transfer accumulator to X
+                {
+                    printf("TODO\n");
+                } break;
+            case TAY: //transfer accumulator to Y
+                {
+                    printf("TODO\n");
+                } break;
+            case TSX: //transfer stack pointer to X
+                {
+                    printf("TODO\n");
+                } break;
+            case TXA: //transfer X to accumulator
+                {
+                    printf("TODO\n");
+                } break;
+            case TXS: //transfer X to stack pointer
+                {
+                    printf("TODO\n");
+                } break;
+            case TYA: //transfer Y to accumulator
+                {
+                    printf("TODO\n");
+                } break;
+            case XXX: // Unknown
+                {
+                    printf("TODO\n");
+                } break;
+            default:
+                {
+                    ABORT("Unknown instruction");
+                }
+        }
     }
+
+    cpu.cycles -= 1;
 }
 
 
@@ -209,4 +607,4 @@ cpu_no_mask_iterrupt() {
 }
 
 
-#endif /* CPU2AO3_H */
+#endif /*CPU2AO3_H*/
