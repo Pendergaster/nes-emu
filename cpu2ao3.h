@@ -13,8 +13,17 @@
 
 // https://en.wikipedia.org/wiki/MOS_Technology_6502
 
-// Different intructions take differnet amoun of clock cycles
+// Different intructions take differnet amount of clock cycles
 // 56 legal instuctions
+
+#define STACK_START             0x0100
+#define STACK_SIZE              0xFF
+#define PROGRAM_START_POINTER   0xFFFC
+
+// https://www.pagetable.com/?p=410
+#define NMI_PC_LOCATION         0xFFFA
+#define RESET_PC_LOCATION       0xFFFC
+#define IRQ_OR_BRK_PC_LOCATION  0xFFFE
 
 typedef enum CpuStatus {
     Carry           = (1 << 0),
@@ -141,7 +150,10 @@ typedef struct cpu2ao3 {
 } cpu2ao3;
 
 // global cpu variable
-cpu2ao3 cpu;
+cpu2ao3 cpu = {
+    .Xreq = 0, .Yreq = 0, .accumReq = 0, .flags = Unused, .pc = 0x0, // pc is read from program start ptr
+    .stackPointer = STACK_SIZE, .cycles = 0
+};
 
 static inline void
 cpu_set_flag(CpuStatus flag,u8 cond) {
@@ -154,7 +166,7 @@ cpu_set_flag(CpuStatus flag,u8 cond) {
 
 static inline u8
 cpu_get_flag(CpuStatus flag) {
-    return   cpu.flags |= flag;
+    return   (cpu.flags |= flag) > 0;
 }
 
 // Instruction, addressmode, cycles TODO clean unknown ones
@@ -204,16 +216,32 @@ Instruction instructionTable[] = {
     INSTRUCTION_TABLE(CREATE_INSTRUCTION_TABLE)
 };
 
-static void
-cpu_init() {
-
-}
 
 
 #define FETCH do{                                                       \
     if(instruct.addressMode != IMP && instruct.addressMode != ACCUM)    \
     fetched = bus_read8(addr);                                          \
 } while(0)                                                              \
+
+// https://wiki.nesdev.com/w/index.php/Stack
+// 6502 had a descending stack, with "empty stack" pointer (points to empty place)
+static inline void
+stack_push (u8 val) {
+
+    if(cpu.stackPointer == 0) ABORT("stack overflow\n");
+
+    bus_write8(STACK_START + cpu.stackPointer, val);
+    cpu.stackPointer -= 1;
+}
+
+static inline u8
+stack_pop () {
+
+    if(cpu.stackPointer == STACK_SIZE) ABORT("stack underflow\n");
+
+    cpu.stackPointer += 1;
+    return bus_read8(STACK_START + cpu.stackPointer);
+}
 
 static void
 cpu_clock() {
@@ -306,12 +334,14 @@ cpu_clock() {
                 // jump to the address stored in a 16-bit pointer anywhere in memory.
                 // this contains bug http://forum.6502.org/viewtopic.php?t=770
                 {
-                    u16 ptr = bus_read16(cpu.pc);
+                    u16 low = (u16)bus_read8(cpu.pc);
+                    u16 high = (u16)bus_read8(cpu.pc + 1);
 
-                    if ((ptr & 0x00FF) == 0x00FF) {// Simulate page boundary hardware bug
-                        ((u8*)&ptr)[1] = bus_read8(cpu.pc & 0xFF); // read pages start to higher byte
+                    if (low == 0x00FF) { // Simulate page boundary hardware bug
+                        high = bus_read8(cpu.pc & 0xFF00); // read pages start to higher byte
                     }
-                    addr = bus_read16(ptr);
+
+                    addr = bus_read16( (high << 8) | low );
                     cpu.pc += 2;
                 } break;
             case INDX: // indirect zero page addressing with x
@@ -351,46 +381,137 @@ cpu_clock() {
         // perform the instruction (this is hopefully optimized to jumptable)
         switch(instruct.instructionCode) {
 
-            case ADC: //add with carry
+            case ADC: //add with carry A + M + C -> A, C
                 {
-                    printf("TODO\n");
+                    FETCH;
+                    u16 temp = (u16)cpu.accumReq + (u16)fetched + (u16)cpu_get_flag(Carry);
+                    cpu_set_flag(Carry, temp > 0xFF);
+                    cpu_set_flag(Zero, temp == 0x0);
+                    cpu_set_flag(Negative, (temp & 0x80) == 0x80);
+
+                    // check overflow
+                    // (2 positives result negative) and (2 negatives result positive)
+                    // so if two high bits are same on operants and different on result set it
+                    cpu_set_flag(Overflow, (cpu.accumReq ^ (u8)(temp & 0x00FF)) &
+                            (fetched ^ (u8)(temp & 0x00FF)) & 0x80);
+#if 0
+                    cpu_set_flag(Overflow,
+                            (~((uint16_t)cpu.accumReq ^ (uint16_t)fetched) &
+                             ((uint16_t)cpu.accumReq ^ (uint16_t)temp)) & 0x0080);
+#endif
+
+                    cpu.accumReq = temp & 0x00FF;
                 } break;
-            case AND: //and (with accumulator)
+            case AND: //and (with accumulator), A AND M -> A
                 {
                     FETCH;
                     cpu.accumReq &= fetched;
+
+                    cpu_set_flag(Negative, cpu.accumReq & 0x80);
+                    cpu_set_flag(Zero, cpu.accumReq == 0);
                 } break;
-            case ASL: //arithmetic shift left
+            case ASL: //arithmetic shift left, C <- [76543210] <- 0
                 {
-                    printf("TODO\n");
+                    FETCH;
+                    u16 temp = ((u16)fetched) << 1;
+
+                    cpu_set_flag(Negative, temp & 0x80);
+                    cpu_set_flag(Zero, temp == 0);
+                    cpu_set_flag(Carry, (temp & 0x0100) > 0x0);
+
+                    if(instruct.addressMode == IMP && instruct.addressMode == ACCUM) {
+                        cpu.accumReq = (u8)temp;
+                    } else {
+                        bus_write8(addr, (u8)temp);
+                    }
                 } break;
             case BCC: //branch on carry clear
                 {
-                    printf("TODO\n");
+                    // http://archive.6502.org/datasheets/rockwell_r65c00_microprocessors.pdf
+                    // 1 cycle if same page 2 if different
+                    if(cpu_get_flag(Carry) == 0) {
+                        cpu.cycles += 1;
+
+                        if((cpu.pc ) && (addr & 0xFF00)) {
+                            cpu.cycles += 1;
+                        }
+                        cpu.pc = addr;
+                    }
                 } break;
             case BCS: //branch on carry set
                 {
-                    printf("TODO\n");
+                    // http://archive.6502.org/datasheets/rockwell_r65c00_microprocessors.pdf
+                    // 1 cycle if same page 2 if different
+                    if(cpu_get_flag(Carry) == 1) {
+                        cpu.cycles += 1;
+
+                        if((cpu.pc ) && (addr & 0xFF00)) {
+                            cpu.cycles += 1;
+                        }
+                        cpu.pc = addr;
+                    }
                 } break;
             case BEQ: //branch on equal (zero set)
                 {
-                    printf("TODO\n");
+                    // http://archive.6502.org/datasheets/rockwell_r65c00_microprocessors.pdf
+                    // 1 cycle if same page 2 if different
+                    if(cpu_get_flag(Zero) == 1) {
+                        cpu.cycles += 1;
+
+                        if(cpu.pc && (addr & 0xFF00)) {
+                            cpu.cycles += 1;
+                        }
+                        cpu.pc = addr;
+                    }
                 } break;
-            case BIT: //bit test
+            case BIT: // bit test, A AND M, M7 -> N, M6 -> V (V=overflow)
+                // bits 7 and 6 of operand are transfered to bit 7 and 6 of SR (N,V);
+                // the zeroflag is set to the result of operand AND accumulator.
                 {
-                    printf("TODO\n");
+                    FETCH;
+                    u8 temp = cpu.accumReq & fetched;
+                    cpu_set_flag(Negative, (temp & (1 << 7)) > 0);
+                    cpu_set_flag(Overflow, (temp & (1 << 6)) > 0);
+                    cpu_set_flag(Zero, temp == 0x0);
                 } break;
             case BMI: //branch on minus (negative set)
                 {
-                    printf("TODO\n");
+                    // http://archive.6502.org/datasheets/rockwell_r65c00_microprocessors.pdf
+                    // 1 cycle if same page 2 if different
+                    if(cpu_get_flag(Negative) == 1) {
+                        cpu.cycles += 1;
+
+                        if((cpu.pc) && (addr & 0xFF00)) {
+                            cpu.cycles += 1;
+                        }
+                        cpu.pc = addr;
+                    }
                 } break;
             case BNE: //branch on not equal (zero clear)
                 {
-                    printf("TODO\n");
+                    // http://archive.6502.org/datasheets/rockwell_r65c00_microprocessors.pdf
+                    // 1 cycle if same page 2 if different
+                    if(cpu_get_flag(Zero) == 0) {
+                        cpu.cycles += 1;
+
+                        if((cpu.pc ) && (addr & 0xFF00)) {
+                            cpu.cycles += 1;
+                        }
+                        cpu.pc = addr;
+                    }
                 } break;
             case BPL: //branch on plus (negative clear)
                 {
-                    printf("TODO\n");
+                    // http://archive.6502.org/datasheets/rockwell_r65c00_microprocessors.pdf
+                    // 1 cycle if same page 2 if different
+                    if(cpu_get_flag(Negative) == 0) {
+                        cpu.cycles += 1;
+
+                        if((cpu.pc ) && (addr & 0xFF00)) {
+                            cpu.cycles += 1;
+                        }
+                        cpu.pc = addr;
+                    }
                 } break;
             case BRK: //break / interrupt
                 {
@@ -406,11 +527,12 @@ cpu_clock() {
                 } break;
             case CLC: //clear carry
                 {
-                    printf("TODO\n");
+                    cpu_set_flag(Carry, 0);
                 } break;
             case CLD: //clear decimal
                 {
-                    printf("TODO\n");
+                    cpu_set_flag(DecimalMode, 0);
+                    ABORT("Decimal clearing should not happen");
                 } break;
             case CLI: //clear interrupt disable
                 {
@@ -418,7 +540,7 @@ cpu_clock() {
                 } break;
             case CLV: //clear overflow
                 {
-                    printf("TODO\n");
+                    cpu_set_flag(Overflow, 0);
                 } break;
             case CMP: //compare (with accumulator)
                 {
@@ -494,7 +616,7 @@ cpu_clock() {
                 } break;
             case PHA: //push accumulator
                 {
-                    printf("TODO\n");
+                    stack_push(cpu.accumReq);
                 } break;
             case PHP: //push processor status (SR)
                 {
@@ -502,7 +624,9 @@ cpu_clock() {
                 } break;
             case PLA: //pull accumulator
                 {
-                    printf("TODO\n");
+                    cpu.accumReq = stack_pop();
+                    cpu_set_flag(Negative, cpu.accumReq & 0x80);
+                    cpu_set_flag(Zero, cpu.accumReq == 0x0);
                 } break;
             case PLP: //pull processor status (SR)
                 {
@@ -524,9 +648,24 @@ cpu_clock() {
                 {
                     printf("TODO\n");
                 } break;
-            case SBC: //subtract with carry
+            case SBC: //subtract with carry, A - M - (1 - C) -> A (1 - C is borrow bit)
                 {
-                    printf("TODO\n");
+                    // same as ADC but with inverted M
+                    FETCH;
+                    fetched ^= 0xFF;
+
+                    u16 temp = (u16)cpu.accumReq + (u16)fetched + (u16)cpu_get_flag(Carry);
+                    cpu_set_flag(Carry, temp > 0xFF);
+                    cpu_set_flag(Zero, temp == 0x0);
+                    cpu_set_flag(Negative, (temp & 0x80) == 0x80);
+
+                    // check overflow
+                    // (2 positives result negative) and (2 negatives result positive)
+                    // so if two high bits are same on operants and different on result set it
+                    cpu_set_flag(Overflow, (cpu.accumReq ^ (u8)(temp & 0x00FF)) &
+                            (fetched ^ (u8)(temp & 0x00FF)) & 0x80);
+
+                    cpu.accumReq = temp & 0x00FF;
                 } break;
             case SEC: //set carry
                 {
@@ -578,7 +717,7 @@ cpu_clock() {
                 } break;
             case XXX: // Unknown
                 {
-                    printf("TODO\n");
+                    ABORT("not legal instruction");
                 } break;
             default:
                 {
@@ -590,15 +729,33 @@ cpu_clock() {
     cpu.cycles -= 1;
 }
 
-
 static void
 cpu_reset() {
 
+    cpu = (cpu2ao3) {
+        .Xreq = 0, .Yreq = 0, .accumReq = 0, .flags = Unused, .pc = 0x0,
+            .stackPointer = STACK_SIZE, .cycles = 0
+    };
+
+    cpu.pc = bus_read16(PROGRAM_START_POINTER);
+    cpu.cycles += 8;
 }
 
 static void
 cpu_iterrupt_request() {
 
+    if(cpu_get_flag(DisableIterups) == 0) {
+        // write current pc to stack
+        stack_push( (cpu.pc >> 8) & 0xFF );
+        stack_push( cpu.pc & 0xFF );
+
+        cpu_set_flag(DisableIterups, 1);
+        cpu_set_flag(Break, 1); // TODO has to be set??
+        cpu_set_flag(Unused, 1); // TODO has to be set??
+
+        // TODO flags before or after?
+        stack_push(cpu.flags);
+    }
 }
 
 static void

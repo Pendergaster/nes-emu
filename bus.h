@@ -25,11 +25,17 @@ bus_write8(u16 addr, u8 data) {
     ram[addr] = data;
 }
 
+// ensure endianess check for this,
+// 6502 is little endian
 static u16
 bus_read16(u16 addr) {
-    return ((u16*)ram)[addr];
+    u16 low = ram[addr];
+    u16 high = ram[addr + 1];
+    return (high << 8) | low;
 }
 
+// ensure endianess check for this,
+// 6502 is little endian
 static void
 bus_write16(u16 addr, u16 data) {
 
