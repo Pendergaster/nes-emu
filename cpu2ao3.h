@@ -30,7 +30,9 @@ typedef enum CpuStatus {
     Zero            = (1 << 1),
     DisableIterups  = (1 << 2),
     DecimalMode     = (1 << 3),
+    // only PHP and BRK sets this flag on push to the stack
     Break           = (1 << 4),
+    // this is kinda always set on?
     Unused          = (1 << 5),
     Overflow        = (1 << 6),
     Negative        = (1 << 7),
@@ -242,6 +244,75 @@ stack_pop () {
     cpu.stackPointer += 1;
     return bus_read8(STACK_START + cpu.stackPointer);
 }
+
+static void
+cpu_reset() {
+
+    cpu = (cpu2ao3) {
+        .Xreq = 0, .Yreq = 0, .accumReq = 0, .flags = Unused, .pc = 0x0,
+            .stackPointer = STACK_SIZE, .cycles = 0
+    };
+
+    cpu.pc = bus_read16(PROGRAM_START_POINTER);
+    cpu.cycles += 8;
+}
+
+static void
+cpu_iterrupt_request() { //irq
+
+    if(cpu_get_flag(DisableIterups) == 0) {
+        // write current pc to stack
+        stack_push( (cpu.pc >> 8) & 0x00FF );
+        stack_push( cpu.pc & 0x00FF );
+
+        // https://www.pagetable.com/?p=410
+        cpu_set_flag(DisableIterups, 1);
+        cpu_set_flag(Break, 0); // TODO has to be set??
+        cpu_set_flag(Unused, 1); // TODO has to be set??
+
+        // TODO flags before or after?
+        stack_push(cpu.flags);
+
+        // read new pc
+        cpu.pc = bus_read16(IRQ_OR_BRK_PC_LOCATION);
+
+        cpu.cycles += 7;
+    }
+}
+
+static void
+cpu_no_mask_iterrupt() { //nmi
+
+    stack_push( (cpu.pc >> 8) & 0xFF );
+    stack_push( cpu.pc & 0xFF );
+
+    // https://www.pagetable.com/?p=410
+    cpu_set_flag(DisableIterups, 1);
+    cpu_set_flag(Break, 0); // TODO has to be set??
+    cpu_set_flag(Unused, 1); // TODO has to be set??
+
+    // TODO flags before or after?
+    stack_push(cpu.flags);
+
+    // read new pc
+    cpu.pc = bus_read16(NMI_PC_LOCATION);
+
+    cpu.cycles += 8;
+}
+
+static void
+cpu_return_from_interrupt() { // RTI
+    cpu.flags = stack_pop();
+    u16 low = stack_pop();
+    u16 high = stack_pop();
+
+    cpu_set_flag(Break, 0);
+    cpu_set_flag(Unused, 1); //TODO has to be set??
+
+    cpu.pc = (high << 8) | low;
+}
+
+
 
 static void
 cpu_clock() {
@@ -507,23 +578,46 @@ cpu_clock() {
                     if(cpu_get_flag(Negative) == 0) {
                         cpu.cycles += 1;
 
-                        if((cpu.pc ) && (addr & 0xFF00)) {
+                        if( (cpu.pc) && (addr & 0xFF00) ) {
                             cpu.cycles += 1;
                         }
                         cpu.pc = addr;
                     }
                 } break;
-            case BRK: //break / interrupt
+            case BRK: //break interrupt, push PC+2, push SR
                 {
-                    printf("TODO\n");
+                    stack_push( (cpu.pc >> 8) & 0xFF );
+                    stack_push( cpu.pc & 0xFF );
+
+                    cpu_set_flag(Break, 1);
+
+                    cpu.pc = bus_read16(IRQ_OR_BRK_PC_LOCATION);
                 } break;
             case BVC: //branch on overflow clear
                 {
-                    printf("TODO\n");
+                    // http://archive.6502.org/datasheets/rockwell_r65c00_microprocessors.pdf
+                    // 1 cycle if same page 2 if different
+                    if(cpu_get_flag(Overflow) == 0) {
+                        cpu.cycles += 1;
+
+                        if( (cpu.pc) && (addr & 0xFF00) ) {
+                            cpu.cycles += 1;
+                        }
+                        cpu.pc = addr;
+                    }
                 } break;
             case BVS: //branch on overflow set
                 {
-                    printf("TODO\n");
+                    // http://archive.6502.org/datasheets/rockwell_r65c00_microprocessors.pdf
+                    // 1 cycle if same page 2 if different
+                    if(cpu_get_flag(Overflow) == 1) {
+                        cpu.cycles += 1;
+
+                        if( (cpu.pc) && (addr & 0xFF00) ) {
+                            cpu.cycles += 1;
+                        }
+                        cpu.pc = addr;
+                    }
                 } break;
             case CLC: //clear carry
                 {
@@ -536,83 +630,156 @@ cpu_clock() {
                 } break;
             case CLI: //clear interrupt disable
                 {
-                    printf("TODO\n");
+                    cpu_set_flag(DisableIterups, 0);
                 } break;
             case CLV: //clear overflow
                 {
                     cpu_set_flag(Overflow, 0);
                 } break;
-            case CMP: //compare (with accumulator)
+            case CMP: //compare (with accumulator) A - M
                 {
-                    printf("TODO\n");
+                    FETCH;
+                    u8 temp = (u16)cpu.accumReq - (u16)fetched;
+                    cpu_set_flag(Carry, cpu.accumReq >= fetched);
+                    cpu_set_flag(Negative, temp  & 0x0080);
+                    cpu_set_flag(Zero, (temp & 0x00FF) == 0x0);
                 } break;
-            case CPX: //compare with X
+            case CPX: //compare with X - M
                 {
-                    printf("TODO\n");
+                    FETCH;
+                    u8 temp = (u16)cpu.Xreq - (u16)fetched;
+                    cpu_set_flag(Carry, cpu.Xreq >= fetched);
+                    cpu_set_flag(Negative, temp  & 0x0080);
+                    cpu_set_flag(Zero, (temp & 0x00FF) == 0x0);
                 } break;
-            case CPY: //compare with Y
+            case CPY: //compare with Y, Y - M
                 {
-                    printf("TODO\n");
+                    FETCH;
+                    u8 temp = (u16)cpu.Yreq - (u16)fetched;
+                    cpu_set_flag(Carry, cpu.Yreq >= fetched);
+                    cpu_set_flag(Negative, temp  & 0x0080);
+                    cpu_set_flag(Zero, (temp & 0x00FF) == 0x0);
                 } break;
-            case DEC: //decrement
+            case DEC: //decrement, M - 1 -> M or (A - 1 ?? TODO)
                 {
-                    printf("TODO\n");
+                    FETCH;
+                    u8 temp = fetched - 1;
+                    cpu_set_flag(Negative, temp & 0x80);
+                    cpu_set_flag(Zero, temp == 0x0);
+                    bus_write8(addr, temp);
                 } break;
-            case DEX: //decrement X
+            case DEX: //decrement X, X - 1 -> X
                 {
-                    printf("TODO\n");
+                    cpu.Xreq -= 1;
+                    cpu_set_flag(Negative, cpu.Xreq & 0x80);
+                    cpu_set_flag(Zero, cpu.Xreq == 0x0);
                 } break;
-            case DEY: //decrement Y
+            case DEY: //decrement Y, Y - 1 -> Y
                 {
-                    printf("TODO\n");
+                    cpu.Yreq -= 1;
+                    cpu_set_flag(Negative, cpu.Yreq & 0x80);
+                    cpu_set_flag(Zero, cpu.Yreq == 0x0);
                 } break;
-            case EOR: //exclusive or (with accumulator)
+            case EOR: //exclusive or (with accumulator), A EOR M -> A
                 {
-                    printf("TODO\n");
+                    FETCH;
+                    cpu.accumReq = cpu.accumReq ^ fetched;
+                    cpu_set_flag(Negative, cpu.accumReq & 0x80);
+                    cpu_set_flag(Zero, cpu.accumReq == 0x0);
                 } break;
-            case INC: //increment
+            case INC: //increment M + 1 -> M (A - 1 -> A ??TODO)
                 {
-                    printf("TODO\n");
+                    FETCH;
+                    u16 temp = (u16)fetched + 1;
+                    bus_write8(addr, temp & 0x00FF);
+
+                    cpu_set_flag(Negative, temp & 0x0080);
+                    cpu_set_flag(Zero, temp == 0x0);
                 } break;
-            case INX: //increment X
+            case INX: //increment X, X + 1 -> X
                 {
-                    printf("TODO\n");
+                    u16 temp = (u16)cpu.Xreq + 1;
+                    bus_write8(addr, temp & 0x00FF);
+
+                    cpu_set_flag(Negative, temp & 0x0080);
+                    cpu_set_flag(Zero, temp == 0x0);
                 } break;
-            case INY: //increment Y
+            case INY: //increment Y, Y + 1 -> Y
                 {
-                    printf("TODO\n");
+                    u16 temp = (u16)cpu.Xreq + 1;
+                    bus_write8(addr, temp & 0x00FF);
+
+                    cpu_set_flag(Negative, temp & 0x0080);
+                    cpu_set_flag(Zero, temp == 0x0);
                 } break;
-            case JMP: //jump
+            case JMP: //jump  (PC+1) -> PCL    (PC+2) -> PCH
                 {
-                    printf("TODO\n");
+                    cpu.pc = addr;
                 } break;
             case JSR: //jump subroutine
                 {
-                    printf("TODO\n");
+                    // our actual instruction
+                    cpu.pc -= 1;
+
+                    stack_push(cpu.pc);
+
+                    // push pc
+                    stack_push( (cpu.pc >> 8) & 0x00FF );
+                    stack_push( cpu.pc & 0x00FF );
+
+                    cpu.pc = addr;
                 } break;
-            case LDA: //load accumulator
+            case LDA: //load accumulator, M -> A
                 {
-                    printf("TODO\n");
+                    FETCH;
+                    cpu.accumReq = fetched;
+
+                    cpu_set_flag(Negative, cpu.accumReq & 0x0080);
+                    cpu_set_flag(Zero, cpu.accumReq == 0x0);
                 } break;
             case LDX: //load X
                 {
-                    printf("TODO\n");
+                    FETCH;
+                    cpu.Xreq = fetched;
+
+                    cpu_set_flag(Negative, cpu.Xreq & 0x0080);
+                    cpu_set_flag(Zero, cpu.Xreq == 0x0);
                 } break;
             case LDY: //load Y
                 {
-                    printf("TODO\n");
+                    FETCH;
+                    cpu.Yreq = fetched;
+
+                    cpu_set_flag(Negative, cpu.Yreq & 0x0080);
+                    cpu_set_flag(Zero, cpu.Yreq == 0x0);
                 } break;
-            case LSR: //logical shift right
+            case LSR: //logical shift right, 0 -> [76543210] -> C
                 {
-                    printf("TODO\n");
+                    FETCH;
+                    u8 temp = fetched >> 1;
+                    cpu_set_flag(Carry, fetched & 0x1);
+                    cpu_set_flag(Negative, 0);
+                    cpu_set_flag(Zero, temp == 0x0);
+
+
+                    if(instruct.addressMode == IMP && instruct.addressMode == ACCUM) {
+                        cpu.accumReq = temp;
+                    } else {
+                        bus_write8(addr, temp);
+                    }
+
                 } break;
             case NOP: //no operation
                 {
-                    printf("TODO\n");
+                    ABORT("not legal instruction (NOP TODO implementation)");
                 } break;
-            case ORA: //or with accumulator
+            case ORA: //or with accumulator,  A OR M -> A
                 {
-                    printf("TODO\n");
+                    FETCH;
+                    cpu.accumReq |= 1;
+
+                    cpu_set_flag(Negative, cpu.accumReq & 0x0080);
+                    cpu_set_flag(Zero, cpu.accumReq == 0x0);
                 } break;
             case PHA: //push accumulator
                 {
@@ -620,7 +787,7 @@ cpu_clock() {
                 } break;
             case PHP: //push processor status (SR)
                 {
-                    printf("TODO\n");
+                    stack_push(cpu.flags);
                 } break;
             case PLA: //pull accumulator
                 {
@@ -630,23 +797,48 @@ cpu_clock() {
                 } break;
             case PLP: //pull processor status (SR)
                 {
-                    printf("TODO\n");
+                    cpu.flags = stack_pop();
                 } break;
-            case ROL: //rotate left
+            case ROL: //rotate left,  C <- [76543210] <- C (M or A)
                 {
-                    printf("TODO\n");
+                    FETCH;
+                    u16 temp = (u16)((fetched << 1) | cpu_get_flag(Carry));
+
+                    cpu_set_flag(Negative, temp & 0x0080);
+                    cpu_set_flag(Zero, temp & 0x00FF);
+                    cpu_set_flag(Carry, (temp & 0xFF00) > 0);
+
+                    if(instruct.addressMode == IMP && instruct.addressMode == ACCUM) {
+                        cpu.accumReq = temp & 0x00FF;
+                    } else {
+                        bus_write8(addr, temp & 0x00FF);
+                    }
+
                 } break;
-            case ROR: //rotate right
+            case ROR: //rotate right, C -> [76543210] -> C
                 {
-                    printf("TODO\n");
+                    FETCH;
+                    u16 temp = (u16)((fetched >> 1) | (cpu_get_flag(Carry) << 7));
+
+                    cpu_set_flag(Negative, temp & 0x0080);
+                    cpu_set_flag(Zero, temp & 0x00FF);
+                    cpu_set_flag(Carry, fetched & 0x1);
+
+                    if(instruct.addressMode == IMP && instruct.addressMode == ACCUM) {
+                        cpu.accumReq = temp & 0x00FF;
+                    } else {
+                        bus_write8(addr, temp & 0x00FF);
+                    }
+
                 } break;
             case RTI: //return from interrupt
                 {
-                    printf("TODO\n");
+                    cpu_return_from_interrupt();
                 } break;
             case RTS: //return from subroutine
                 {
-                    printf("TODO\n");
+                    cpu.pc = stack_pop();
+                    cpu.pc += 1;
                 } break;
             case SBC: //subtract with carry, A - M - (1 - C) -> A (1 - C is borrow bit)
                 {
@@ -669,51 +861,61 @@ cpu_clock() {
                 } break;
             case SEC: //set carry
                 {
-                    printf("TODO\n");
+                    cpu_set_flag(Carry, 1);
                 } break;
             case SED: //set decimal
                 {
-                    printf("TODO\n");
+                    ABORT("Set decimal should not be called!");
                 } break;
             case SEI: //set interrupt disable
                 {
-                    printf("TODO\n");
+                    cpu_set_flag(DisableIterups, 1);
                 } break;
-            case STA: //store accumulator
+            case STA: //store accumulator,  A -> M
                 {
-                    printf("TODO\n");
+                    bus_write8(addr, cpu.accumReq);
                 } break;
-            case STX: //store X
+            case STX: //store X, X -> M
                 {
-                    printf("TODO\n");
+                    bus_write8(addr, cpu.Xreq);
                 } break;
-            case STY: //store Y
+            case STY: //store Y, Y -> M
                 {
-                    printf("TODO\n");
+                    bus_write8(addr, cpu.Yreq);
                 } break;
-            case TAX: //transfer accumulator to X
+            case TAX: //transfer accumulator to X, A -> X
                 {
-                    printf("TODO\n");
+                    cpu.Xreq = cpu.accumReq;
+                    cpu_set_flag(Negative, cpu.Xreq & 0x80);
+                    cpu_set_flag(Zero, cpu.Xreq == 0x0);
                 } break;
-            case TAY: //transfer accumulator to Y
+            case TAY: //transfer accumulator to Y, A -> Y
                 {
-                    printf("TODO\n");
+                    cpu.Yreq = cpu.accumReq;
+                    cpu_set_flag(Negative, cpu.Yreq & 0x80);
+                    cpu_set_flag(Zero, cpu.Yreq == 0x0);
                 } break;
             case TSX: //transfer stack pointer to X
                 {
-                    printf("TODO\n");
+                    cpu.Xreq = cpu.stackPointer;
+                    cpu_set_flag(Negative, cpu.Xreq & 0x80);
+                    cpu_set_flag(Zero, cpu.Xreq == 0x0);
                 } break;
-            case TXA: //transfer X to accumulator
+            case TXA: //transfer X to accumulator, X -> A
                 {
-                    printf("TODO\n");
+                    cpu.accumReq = cpu.Xreq;
+                    cpu_set_flag(Negative, cpu.accumReq & 0x80);
+                    cpu_set_flag(Zero, cpu.accumReq == 0x0);
                 } break;
-            case TXS: //transfer X to stack pointer
+            case TXS: //transfer X to stack pointer, X -> SP
                 {
-                    printf("TODO\n");
+                    cpu.stackPointer = cpu.Xreq;
                 } break;
-            case TYA: //transfer Y to accumulator
+            case TYA: //transfer Y to accumulator, Y -> A
                 {
-                    printf("TODO\n");
+                    cpu.accumReq = cpu.Yreq;
+                    cpu_set_flag(Negative, cpu.accumReq & 0x80);
+                    cpu_set_flag(Zero, cpu.accumReq == 0x0);
                 } break;
             case XXX: // Unknown
                 {
@@ -728,40 +930,5 @@ cpu_clock() {
 
     cpu.cycles -= 1;
 }
-
-static void
-cpu_reset() {
-
-    cpu = (cpu2ao3) {
-        .Xreq = 0, .Yreq = 0, .accumReq = 0, .flags = Unused, .pc = 0x0,
-            .stackPointer = STACK_SIZE, .cycles = 0
-    };
-
-    cpu.pc = bus_read16(PROGRAM_START_POINTER);
-    cpu.cycles += 8;
-}
-
-static void
-cpu_iterrupt_request() {
-
-    if(cpu_get_flag(DisableIterups) == 0) {
-        // write current pc to stack
-        stack_push( (cpu.pc >> 8) & 0xFF );
-        stack_push( cpu.pc & 0xFF );
-
-        cpu_set_flag(DisableIterups, 1);
-        cpu_set_flag(Break, 1); // TODO has to be set??
-        cpu_set_flag(Unused, 1); // TODO has to be set??
-
-        // TODO flags before or after?
-        stack_push(cpu.flags);
-    }
-}
-
-static void
-cpu_no_mask_iterrupt() {
-
-}
-
 
 #endif /*CPU2AO3_H*/
