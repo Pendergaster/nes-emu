@@ -27,7 +27,7 @@ static const u64 numeric_max_u64 = 0xFFFFFFFFFFFFFFFF;
 
 #define VA_ARGS(...) , ##__VA_ARGS__
 
-#define free(PTR) do{free((PTR));(PTR) = NULL;}while(0)
+// #define free(PTR) do{free((PTR));(PTR) = NULL;}while(0)
 
 #define PTR_CAST(TYPE, VAL) (((union {typeof(VAL) src; TYPE dst;}*)(&VAL))->dst)
 

@@ -7,6 +7,7 @@
 
 #include "defs.h"
 #include "bus.h"
+// http://www.6502.org/tutorials/6502opcodes.html#ROR opcode explanations
 
 // Basicly 6502 cpu implementation
 // cpu is connected to bus with address lines and data lines
@@ -168,7 +169,7 @@ cpu_set_flag(CpuStatus flag,u8 cond) {
 
 static inline u8
 cpu_get_flag(CpuStatus flag) {
-    return   (cpu.flags |= flag) > 0;
+    return   (cpu.flags & flag) > 0;
 }
 
 // Instruction, addressmode, cycles TODO clean unknown ones
@@ -314,10 +315,13 @@ cpu_return_from_interrupt() { // RTI
 
 
 
-static void
+static u8
 cpu_clock() {
 
     // execute the intruction
+
+    u8 ret = cpu.cycles == 0;
+
     if(cpu.cycles == 0) {
         u8 opcode = bus_read8(cpu.pc);
         cpu.pc += 1;
@@ -365,7 +369,10 @@ cpu_clock() {
             case REL: // Branch instructions (e.g. BEQ, BCS) have a relative addressing mode
                 // that specifies an 8-bit signed offset relative to the current PC.
                 {
-                    addr += (i8)bus_read8(cpu.pc); //TODO might be incorrect
+
+                    i8 rel = (i8)bus_read8(cpu.pc); //TODO might be incorrect
+                    cpu.pc += 1;
+                    addr = rel + (cpu.pc);
                 }
                 break;
             case ABS:
@@ -375,7 +382,7 @@ cpu_clock() {
                 } break;
             case ABSX:
                 {
-                    addr = (bus_read16(cpu.pc));
+                    addr = bus_read16(cpu.pc);
                     cpu.pc += 2;
 
                     // implement the oops cycle on page change
@@ -389,7 +396,7 @@ cpu_clock() {
                 } break;
             case ABSY:
                 {
-                    addr = (bus_read16(cpu.pc));
+                    addr = bus_read16(cpu.pc);
                     cpu.pc += 2;
 
                     // implement the oops cycle on page change
@@ -456,6 +463,10 @@ cpu_clock() {
                 {
                     FETCH;
                     u16 temp = (u16)cpu.accumReq + (u16)fetched + (u16)cpu_get_flag(Carry);
+                    printf("Fetched %d , accum %d, get_carry %d get_u %d\n",
+                            (u16)cpu.accumReq, (u16)fetched, (u16)cpu_get_flag(Carry),
+                            (u16)cpu_get_flag(Unused));
+
                     cpu_set_flag(Carry, temp > 0xFF);
                     cpu_set_flag(Zero, temp == 0x0);
                     cpu_set_flag(Negative, (temp & 0x80) == 0x80);
@@ -563,6 +574,7 @@ cpu_clock() {
                     // http://archive.6502.org/datasheets/rockwell_r65c00_microprocessors.pdf
                     // 1 cycle if same page 2 if different
                     if(cpu_get_flag(Zero) == 0) {
+                        printf("branching!\n");
                         cpu.cycles += 1;
 
                         if((cpu.pc ) && (addr & 0xFF00)) {
@@ -929,6 +941,15 @@ cpu_clock() {
     }
 
     cpu.cycles -= 1;
+
+    return ret;
+}
+
+static void
+cpu_load_rom(u8* rom, u8 len, u16 loadAddress) {
+
+    memcpy(&ram[loadAddress], rom, len);
+    bus_write16(PROGRAM_START_POINTER, loadAddress);
 }
 
 #endif /*CPU2AO3_H*/

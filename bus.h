@@ -12,6 +12,8 @@
 // this allows to connect different devices to talk with the cpu and map them to this address range
 
 
+// 0x0 - 0x1FFF cpu addressable range
+// 0x4020 - 0xFFFF cartridge range
 u8 ram[0xFFFF];
 
 static u8
@@ -38,8 +40,11 @@ bus_read16(u16 addr) {
 // 6502 is little endian
 static void
 bus_write16(u16 addr, u16 data) {
+    u16 high = (data >> 8);
+    u16 low = data & 0x00FF;
 
-    ((u16*)ram)[addr] = data;
+    bus_write8(addr, low);
+    bus_write8(addr + 1, high);
 }
 
 #endif /* BUS_H */
