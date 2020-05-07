@@ -56,5 +56,11 @@ static const u64 numeric_max_u64 = 0xFFFFFFFFFFFFFFFF;
 #define LINUX_PLATFORM
 #endif
 
+#define STATIC_ASSERT(COND,MSG) typedef char static_assertion_##MSG[(COND)?1:-1]
+
+static inline u8
+address_is_between(u16 val, u16 start, u16 end) {
+    return val >= start && val <= (start + end);
+}
 
 #endif // UTILSDEFS

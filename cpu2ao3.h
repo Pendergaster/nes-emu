@@ -369,8 +369,7 @@ cpu_clock() {
             case REL: // Branch instructions (e.g. BEQ, BCS) have a relative addressing mode
                 // that specifies an 8-bit signed offset relative to the current PC.
                 {
-
-                    i8 rel = (i8)bus_read8(cpu.pc); //TODO might be incorrect
+                    i8 rel = (i8)bus_read8(cpu.pc);
                     cpu.pc += 1;
                     addr = rel + (cpu.pc);
                 }

@@ -11,7 +11,10 @@
 #include "printutils.h"
 #include "fileload.h"
 
+#include "bus.h"
 #include "cpu2ao3.h"
+#include "cartridge.h"
+#include "ppu.h"
 #include "cpudebugger.h"
 
 const u32 width = 1000, height = 800;
