@@ -193,6 +193,7 @@ static void _ABORT(const char* file,const u32 row,char* format,...) {
         SetConsoleTextAttribute(consoleHandle, saved_attributes);
     }
 #endif
+    getchar();
     _Exit(1);
 }
 

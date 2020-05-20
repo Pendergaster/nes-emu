@@ -61,10 +61,13 @@ STATIC_ASSERT(sizeof(INESHeader) == 16, header_size_wrong);
 #define TRAINER_SIZE            512
 
 static void
-cartridge_load() {
+cartridge_load(const char* name) {
     size_t size;
     u8* to_free;
-    u8* data = to_free = load_binary_file("test.rom", &size);
+    u8* data = to_free = load_binary_file(name, &size);
+    if(!data) {
+        ABORT("failed to load cartridge");
+    }
 
     INESHeader header;
     memcpy( &header, data, sizeof(INESHeader));
@@ -110,8 +113,9 @@ cartridge_load() {
 u16
 cartridge_cpu_read_rom(u16 addr) {
 
-    u16 actualAddr = mapper.cpu_translate_read(addr);
+    if(!mapper.cpu_translate_read) return 0;
 
+    u16 actualAddr = mapper.cpu_translate_read(addr);
     if(actualAddr >= cartridge.numProgramRoms * PROG_ROM_SINGLE_SIZE) ABORT("mem overflow");
 
     return cartridge.programMemory[actualAddr];
@@ -121,8 +125,9 @@ cartridge_cpu_read_rom(u16 addr) {
 void
 cartridge_cpu_write_rom(u16 addr, u8 val) {
 
-    u16 actualAddr = mapper.cpu_translate_write(addr);
+    if(!mapper.cpu_translate_write) return;
 
+    u16 actualAddr = mapper.cpu_translate_write(addr);
     if(actualAddr >= cartridge.numProgramRoms * PROG_ROM_SINGLE_SIZE) ABORT("mem overflow");
 
     cartridge.programMemory[actualAddr] = val;

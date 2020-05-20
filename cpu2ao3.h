@@ -573,7 +573,6 @@ cpu_clock() {
                     // http://archive.6502.org/datasheets/rockwell_r65c00_microprocessors.pdf
                     // 1 cycle if same page 2 if different
                     if(cpu_get_flag(Zero) == 0) {
-                        printf("branching!\n");
                         cpu.cycles += 1;
 
                         if((cpu.pc ) && (addr & 0xFF00)) {
@@ -637,7 +636,8 @@ cpu_clock() {
             case CLD: //clear decimal
                 {
                     cpu_set_flag(DecimalMode, 0);
-                    ABORT("Decimal clearing should not happen");
+                    // might happen on some tests
+                    //ABORT("Decimal clearing should not happen");
                 } break;
             case CLI: //clear interrupt disable
                 {
@@ -709,19 +709,17 @@ cpu_clock() {
                 } break;
             case INX: //increment X, X + 1 -> X
                 {
-                    u16 temp = (u16)cpu.Xreq + 1;
-                    bus_write8(addr, temp & 0x00FF);
+                    cpu.Xreq += 1;
 
-                    cpu_set_flag(Negative, temp & 0x0080);
-                    cpu_set_flag(Zero, temp == 0x0);
+                    cpu_set_flag(Negative, cpu.Xreq & 0x0080);
+                    cpu_set_flag(Zero, cpu.Xreq == 0x0);
                 } break;
             case INY: //increment Y, Y + 1 -> Y
                 {
-                    u16 temp = (u16)cpu.Xreq + 1;
-                    bus_write8(addr, temp & 0x00FF);
+                    cpu.Yreq += 1;
 
-                    cpu_set_flag(Negative, temp & 0x0080);
-                    cpu_set_flag(Zero, temp == 0x0);
+                    cpu_set_flag(Negative, cpu.Yreq & 0x0080);
+                    cpu_set_flag(Zero, cpu.Yreq == 0x0);
                 } break;
             case JMP: //jump  (PC+1) -> PCL    (PC+2) -> PCH
                 {
@@ -782,7 +780,8 @@ cpu_clock() {
                 } break;
             case NOP: //no operation
                 {
-                    ABORT("not legal instruction (NOP TODO implementation)");
+                    // TODO
+                    //ABORT("not legal instruction (NOP TODO implementation)");
                 } break;
             case ORA: //or with accumulator,  A OR M -> A
                 {
@@ -947,7 +946,9 @@ cpu_clock() {
 static void
 cpu_load_rom(u8* rom, u8 len, u16 loadAddress) {
 
-    memcpy(&ram[loadAddress], rom, len);
+    for(int i = 0; i < len; i++) {
+        bus_write8(loadAddress + i, rom[i]);
+    }
     bus_write16(PROGRAM_START_POINTER, loadAddress);
 }
 

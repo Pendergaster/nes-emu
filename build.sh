@@ -1,7 +1,7 @@
 #!/bin/bash
 clear
 BUILD_DIR=./build
-COMPILATION_UNITS=./main.c
+COMPILATION_UNITS="./main.c ./nuklear_imp.c"
 EX_NAME=nes
 C_VERSION=-std=gnu99
 
@@ -12,7 +12,7 @@ fi
 
 echo "Building..."
 #
-gcc -g $COMPILATION_UNITS $C_VERSION  -Wall -Wextra -Wno-missing-braces -Wno-unused-function -lm -lSDL2 -lGL -o "$BUILD_DIR"/"$EX_NAME"
+time gcc -g $COMPILATION_UNITS $C_VERSION  -Wall -Wextra -Wno-missing-braces -Wno-unused-function -lm -lSDL2 -lGL -o "$BUILD_DIR"/"$EX_NAME"
 EC=$?
 
 [ $EC -eq 0 ] && echo "Build succesfull" || echo "Build failed"

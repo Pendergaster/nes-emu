@@ -6,7 +6,7 @@
 #define FILELOAD_H
 
 static void*
-_load_file(char* const path, char* const filetype, size_t* fileSize) {
+_load_file(const char* path, char* const filetype, size_t* fileSize) {
     *fileSize = 0;
     FILE* fp = fopen(path,filetype);
     if(fp == NULL ) return NULL;
@@ -21,7 +21,7 @@ _load_file(char* const path, char* const filetype, size_t* fileSize) {
 }
 
 static inline void*
-load_binary_file(char* const path, size_t* fileSize) {
+load_binary_file(const char* path, size_t* fileSize) {
     return _load_file(path,"rb", fileSize);
 }
 

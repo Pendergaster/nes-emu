@@ -14,7 +14,10 @@
 u16
 mapper0_cpu_read(u16 addr) {
 
-    if(!address_is_between(addr, MAP0_START, MAP0_END)) ABORT("invalid address in mapper0");
+    if(!address_is_between(addr, MAP0_START, MAP0_END)) {
+        return 0;
+        //ABORT("invalid address in mapper0 0x%04X", addr);
+    }
 
     u16 ret = 0;
     if(cartridge.numProgramRoms == 1)
@@ -28,7 +31,9 @@ mapper0_cpu_read(u16 addr) {
 u16
 mapper0_cpu_write(u16 addr) {
 
-    if(!address_is_between(addr, MAP0_START, MAP0_END)) ABORT("invalid address in mapper0");
+    if(!address_is_between(addr, MAP0_START, MAP0_END))
+        return 0;
+        //ABORT("invalid address in mapper0 0x%04X", addr);
 
     u16 ret = 0;
     if(cartridge.numProgramRoms == 1)
@@ -42,7 +47,8 @@ mapper0_cpu_write(u16 addr) {
 u16
 mapper0_ppu_read(u16 addr) {
 
-    if(!address_is_between(addr, 0, MAP0_PPU_DATA_SIZE)) ABORT("invalid address in mapper0");
+    if(!address_is_between(addr, 0, MAP0_PPU_DATA_SIZE))
+        ABORT("invalid address in mapper0 0x%04X", addr);
 
     return addr;
 }
@@ -61,7 +67,7 @@ mapper0_ppu_write(u16 addr) { // TODO??
 struct Mapper mapper0 = {
     .cpu_translate_read = mapper0_cpu_read,
     .cpu_translate_write = mapper0_cpu_write,
-    .ppu_translate_read = mapper0_ppu_write,
+    .ppu_translate_read = mapper0_ppu_read,
     .ppu_translate_write = mapper0_ppu_write
 };
 

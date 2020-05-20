@@ -60,7 +60,31 @@ static const u64 numeric_max_u64 = 0xFFFFFFFFFFFFFFFF;
 
 static inline u8
 address_is_between(u16 val, u16 start, u16 end) {
-    return val >= start && val <= (start + end);
+    return val >= start && val <= end;
 }
+
+GLenum
+glCheckError_(const char *file, int line) {
+    GLenum errorCode;
+    while ((errorCode = glGetError()) != GL_NO_ERROR) {
+        unsigned char* error = NULL;
+        switch (errorCode) {
+            case GL_INVALID_ENUM:                  error = (unsigned char*)"INVALID_ENUM"; break;
+            case GL_INVALID_VALUE:                 error = (unsigned char*)"INVALID_VALUE"; break;
+            case GL_INVALID_OPERATION:             error = (unsigned char*)"INVALID_OPERATION"; break;
+            case GL_OUT_OF_MEMORY:                 error = (unsigned char*)"OUT_OF_MEMORY"; break;
+            case GL_INVALID_FRAMEBUFFER_OPERATION: error = (unsigned char*)"INVALID_FRAMEBUFFER_OPERATION"; break;
+        }
+        //FATALERRORMESSAGE("GL ERROR %s \n", error);
+        printf("GL ERROR %s (file %s, line %d)\n", error, file, line);
+        exit(1);
+    }
+    return errorCode;
+}
+
+#define gl_check_error() glCheckError_(__FILE__, __LINE__)
+#define GLCHECK(FUN) do{FUN; glCheckError_(__FILE__, __LINE__); } while(0)
+
+
 
 #endif // UTILSDEFS

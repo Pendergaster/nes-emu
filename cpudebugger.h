@@ -5,6 +5,7 @@
 #ifndef CPUDEBUGGER_H
 #define CPUDEBUGGER_H
 
+#if 1
 #define NK_INCLUDE_FIXED_TYPES
 #define NK_INCLUDE_STANDARD_IO
 #define NK_INCLUDE_STANDARD_VARARGS
@@ -14,8 +15,11 @@
 #define NK_INCLUDE_DEFAULT_FONT
 #define NK_IMPLEMENTATION
 #define NK_SDL_GL3_IMPLEMENTATION
+#endif
 #include "nuklear.h"
 #include "nuklear_sdl_gl3.h"
+
+
 
 #define MAX_VERTEX_MEMORY 512 * 1024
 #define MAX_ELEMENT_MEMORY 128 * 1024
@@ -29,7 +33,7 @@
 #ifdef INCLUDE_ALL
 //#define INCLUDE_CALCULATOR
 //#define INCLUDE_NODE_EDITOR
-//#define INCLUDE_OVERVIEW
+#define INCLUDE_OVERVIEW
 //#define INCLUDE_STYLE
 #endif
 
@@ -43,7 +47,7 @@
 //#include "node_editor.c"
 #endif
 #ifdef INCLUDE_OVERVIEW
-//#include "overview.c"
+#include "overview.c"
 #endif
 
 /* GUI */
@@ -165,7 +169,6 @@ cpu_debugger_init(SDL_Window *win) {
     /*set_style(ctx, THEME_BLUE);*/
     /*set_style(ctx, THEME_DARK);*/
 #endif
-
 }
 
 static void
@@ -173,7 +176,7 @@ cpu_memory_debugger() {
 
     bg.r = 0.10f, bg.g = 0.18f, bg.b = 0.24f, bg.a = 1.0f;
 
-    if (nk_begin(ctx, "Cpu Memory Debugger", nk_rect(0, 0, 700, 1000),
+    if (nk_begin(ctx, "Cpu Memory Debugger", nk_rect(0, 0, 700, 800),
                 NK_WINDOW_BORDER|NK_WINDOW_MOVABLE|NK_WINDOW_SCALABLE|
                 NK_WINDOW_MINIMIZABLE|NK_WINDOW_TITLE))
     {
@@ -210,7 +213,7 @@ cpu_memory_debugger() {
         }
 #endif
         // Print reqisters
-        nk_layout_row_static(ctx, 25, 100, 3);
+        nk_layout_row_static(ctx, 25, 100, 4);
 
         char reqString[64];
         sprintf ( reqString,"reqX 0x0%X", cpu.Xreq);
@@ -218,6 +221,8 @@ cpu_memory_debugger() {
         sprintf ( reqString,"reqY 0x0%X", cpu.Yreq);
         nk_label(ctx, reqString, NK_TEXT_LEFT);
         sprintf ( reqString,"reqA 0x0%X", cpu.accumReq);
+        nk_label(ctx, reqString, NK_TEXT_LEFT);
+        sprintf ( reqString,"Stack 0x0%X", cpu.stackPointer);
         nk_label(ctx, reqString, NK_TEXT_LEFT);
 
         // Show flag status
@@ -369,41 +374,48 @@ cpu_intruction_debugger() {
     nk_end(ctx);
 }
 
-int step = 0, debug = 0;
+int step = 0, debug = 0, frameSkip = 0, hide = 0;
 static void
 cpu_debugger_update() {
 
+#if 1
+    if(hide == 0) {
+        cpu_memory_debugger();
 
-    cpu_memory_debugger();
+        cpu_intruction_debugger();
+    }
 
-    cpu_intruction_debugger();
-
-
-    if (nk_begin(ctx, "Cpu menu", nk_rect(400, 500, 300, 300),
+    if (nk_begin(ctx, "Cpu menu", nk_rect(SCREEN_WIDTH - 300, 0, 300, 300),
                 NK_WINDOW_BORDER|NK_WINDOW_MOVABLE|NK_WINDOW_SCALABLE|
                 NK_WINDOW_MINIMIZABLE|NK_WINDOW_TITLE))
     {
         nk_layout_row_static(ctx, 30, 80, 1);
 
-        if(nk_button_label(ctx, "Step")) {
-            step = 1;
-        }
+        if(hide == 0) {
+            if(nk_button_label(ctx, "Step")) {
+                step = 1;
+            }
 
-        if(nk_button_label(ctx, "Reset")) {
-            cpu_reset();
-        }
+            if(nk_button_label(ctx, "Reset")) {
+                cpu_reset();
+            }
 
-        if(nk_button_label(ctx, "IRQ")) {
-            cpu_iterrupt_request();
-        }
+            if(nk_button_label(ctx, "IRQ")) {
+                cpu_iterrupt_request();
+            }
 
-        if(nk_button_label(ctx, "INM")) {
-            cpu_no_mask_iterrupt();
+            if(nk_button_label(ctx, "INM")) {
+                cpu_no_mask_iterrupt();
+            }
         }
 
         nk_checkbox_label(ctx, "Debug", &debug);
+        nk_checkbox_label(ctx, "Hide", &hide);
+        nk_checkbox_label(ctx, "frameSkip", &frameSkip);
     }
     nk_end(ctx);
+#endif
+
 
     /* -------------- EXAMPLES ---------------- */
 #ifdef INCLUDE_CALCULATOR
