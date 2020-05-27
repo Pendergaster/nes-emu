@@ -29,6 +29,9 @@ static u8 ppu_read(u16 addr);
 
 #include "cmath.h"
 
+static FILE* file;
+static int count;
+
 typedef struct ImageView {
     u8*     data;
     u32     w,h;
@@ -91,9 +94,11 @@ struct PPU {
     u8          internalDataBuffer;
     u16         dataAddr; // PPUADDR / PPUDATA
 
+    u8          NMIGenerated; // TODO sould generate one in cpu write?
+    // http://wiki.nesdev.com/w/index.php/PPU_registers#PPUCTRL
+
     ImageView   screen;
     ImageView   pattern[2];
-
 
     GLuint      renderProgram;
     GLint       transformLoc;
@@ -125,7 +130,6 @@ ppu_read(u16 addr) {
     u8 data = 0x00;
     addr &= PPU_MAX_MEMORY_ADDR;
 
-
     if(address_is_between(addr,
                 PPU_PATTERN_MEMORY_START, PPU_PATTERN_MEMORY_END)) {
 
@@ -150,6 +154,13 @@ ppu_read(u16 addr) {
         if (addr == 0x001C) addr = 0x000C;
 
         data = ppu.palette[addr];
+
+#ifdef COUNT
+        if(count >= 0xC) {
+            fprintf(file, "addr 0x%04X data 0x%04X\n", addr, data);
+        }
+#endif
+
     } else {
         data = cartridge_ppu_read_rom(addr);
     }
@@ -177,11 +188,26 @@ ppu_write(u16 addr, u8 data) {
     } else if (address_is_between(addr,
                 PPU_PALETTE_MEMORY_START, PPU_PALETTE_MEMORY_END)) {
 
+        u16 orgAdd = addr;
         addr &= 0x001F;
         if (addr == 0x0010) addr = 0x0000;
         if (addr == 0x0014) addr = 0x0004; // TODO check
         if (addr == 0x0018) addr = 0x0008;
         if (addr == 0x001C) addr = 0x000C;
+
+        LOG("writing to 0x%04X %d (org 0x%04X)", addr, data, orgAdd);
+#ifdef COUNT
+        if(++count >= 0xC && !file) {
+            LOG("Opened file!!!");
+            file = fopen("log.txt", "w");
+            return;
+        }
+#endif
+
+        if(++count >= 0xC + 3) {
+            exit(1);
+            return;
+        }
 
         ppu.palette[addr] = data;
     } else {
@@ -192,9 +218,17 @@ ppu_write(u16 addr, u8 data) {
 static void
 ppu_clock() {
 
-#if 0
+#if 1
+
+    if(ppu.scanline == -1 && ppu.cycle == 1) {
+        ppu.statusReq &= ~VerticalBlankStarted;
+    }
+
     if(ppu.scanline == 241 && ppu.cycle == 1) {
         ppu.statusReq |= VerticalBlankStarted;
+        if(ppu.controllerReq & GenerateNMI) {
+            ppu.NMIGenerated = 1;
+        }
     }
     ppu.cycle++;
     if (ppu.cycle >= 341)
@@ -233,11 +267,21 @@ static inline Color
 ppu_palette_get_color(u8 pixel, u32 paletteIndex) {
 
     u16 paletteLocation = PPU_PALETTE_MEMORY_START + (paletteIndex * 4) + pixel;
+#ifdef COUNT
+    if(count >= 0xC) {
+        fprintf(file,"location 0x%04X\n", paletteLocation );
+    }
+#endif
     u8 data = ppu_read(paletteLocation);
 
-    if(data >= SIZEOF_ARRAY(colors)) ABORT("Color mem overflow");
-
-    return colors[data];
+#ifdef COUNT
+    //if(data >= SIZEOF_ARRAY(colors)) ABORT("Color mem overflow");
+    Color RERERE = colors[data & 0x3F];
+    if(count >= 0xC) {
+        fprintf(file,"color %d %d %d\n", RERERE.r, RERERE.g, RERERE.b);
+    }
+#endif
+    return colors[data & 0x3F];
 }
 
 static void
@@ -248,6 +292,7 @@ ppu_cpu_write(u16 addr, u8 data) {
         case 0x0: //PPUCTRL
             {
                 ppu.controllerReq = data;
+                // TODO should generate NMI if in vertical blank?
             } break;
         case 0x1: //PPUMASK
             {
@@ -280,7 +325,6 @@ ppu_cpu_write(u16 addr, u8 data) {
         case 0x7: //PPUDATA
             {
                 ppu_write(ppu.dataAddr, data);
-
                 ppu.dataAddr += ppu.controllerReq & VramAddressIncrement ? 32 : 1;
             } break;
         default:
@@ -297,7 +341,6 @@ ppu_cpu_read(u16 addr) {
     switch(addr) {
         case 0x2: //PPUSTATUS
             {
-                ppu.statusReq |= VerticalBlankStarted;
                 ret = ppu.statusReq;
                 ppu.statusReq &= ~VerticalBlankStarted;
                 ppu.dataAddr = 0;
@@ -340,8 +383,19 @@ ppu_cpu_read(u16 addr) {
 
 static void
 ppu_render_patterntable(u8 index, u32 paletteIndex) { // there is 2 pattern tables so this is 0 or 1
+#ifdef COUNT
+    if(count >= 0xC) {
+        fprintf(file, "starting to read\n");
+    }
+#endif
 
     for(u16 tileY = 0; tileY < NUM_TILES; tileY++) { // FOR TILE Y
+#ifdef COUNT
+        if(count >= 0xC) {
+            fprintf(file, "Ytile %d\n", tileY);
+        }
+#endif
+
         for(u16 tileX = 0; tileX < NUM_TILES; tileX++) { // FOR TILE X
 
             u16 tileoffset = (tileY * NUM_TILES + tileX)
@@ -367,7 +421,6 @@ ppu_render_patterntable(u8 index, u32 paletteIndex) { // there is 2 pattern tabl
 
                     // Set pixel in texture
                     Color color = ppu_palette_get_color(pixel, paletteIndex);
-                    //printf("color %d %d %d\n", color.r ,color.g, color.b);
 
                     // Draw the pixel
                     memcpy(ppu.pattern[index].data + (imageY * ppu.pattern[index].w + imageX) * sizeof(Color),
@@ -376,6 +429,12 @@ ppu_render_patterntable(u8 index, u32 paletteIndex) { // there is 2 pattern tabl
             }
         }
     }
+#ifdef COUNT
+    if(count >= 0xC) {
+        fclose(file);
+        exit(1);
+    }
+#endif
 }
 
 static ImageView

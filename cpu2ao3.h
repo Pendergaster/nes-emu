@@ -150,6 +150,8 @@ typedef struct cpu2ao3 {
 
     u8 stackPointer;
     u8 cycles;
+
+    u64 instructionCount;
 } cpu2ao3;
 
 // global cpu variable
@@ -314,7 +316,9 @@ cpu_return_from_interrupt() { // RTI
 }
 
 
-
+int debug = 0;
+u16 breakpoint = 0;
+u16 instructionCountBreakPoint = 0;
 static u8
 cpu_clock() {
 
@@ -324,10 +328,34 @@ cpu_clock() {
 
     if(cpu.cycles == 0) {
         u8 opcode = bus_read8(cpu.pc);
+#if 0
+        static int count;
+        static FILE* file;
+
+        if (!file)  {
+            file = fopen("log.txt", "w");
+        }
+
+        fprintf(file,"opcode 0x%04X pc 0x%04X accum 0x%04X\n",
+                opcode, cpu.pc, cpu.accumReq);
+
+        if(count++ > 1000000) {
+            fclose(file);
+            exit(1);
+        }
+#endif
         cpu.pc += 1;
 
         Instruction instruct = instructionTable[opcode];
         cpu.cycles = instruct.cycles;
+
+        printf("instruction 0x%04X, pc 0x%04X opcode 0x%04X, accum 0x%04X , yreq 0x%04X , count %ld\n",
+               instruct.instructionCode , cpu.pc - 1, opcode, cpu.accumReq,
+               cpu.Yreq, cpu.instructionCount);
+
+        //if(cpu.instructionCount > 1000) {
+        //    exit(1);
+        //}
 
         u16 addr = 0;
         u8 fetched = 0;
@@ -425,27 +453,34 @@ cpu_clock() {
                 {
                     u16 ptr = (u16)bus_read8(cpu.pc);
 
-                    u16 low = bus_read8((ptr + cpu.Xreq) % 256) << 8;
-                    u16 high = bus_read8((ptr + cpu.Xreq + 1) % 256);
+                    u16 low = bus_read8((ptr + cpu.Xreq) & 0xFF);
+                    u16 high = bus_read8((ptr + cpu.Xreq + 1) & 0xFF);
 
-                    addr = low | high;
+                    addr = low | (high << 8);
 
                     cpu.pc += 1;
+
                 } break;
             case INDY: // indirect zero page addressing with y
                 {
                     u16 ptr = (u16)bus_read8(cpu.pc);
 
-                    u16 low = bus_read8(ptr % 256) << 8;
-                    u16 high = bus_read8((ptr + 1) % 256);
+                    //printf("ptr 0x%04X\n", ptr);
+                    //printf("Yreq 0x%04X\n", cpu.Yreq);
 
-                    u16 temp = (low | (high << 8)) + cpu.Yreq;
+                    u16 low = bus_read8(ptr & 0xFF); // TODO jotain on vaarin
+                    //printf("low 0x%04X\n", low);
+                    u16 high = bus_read8((ptr + 1) & 0xFF); // TODO jotain on vaarin
+                    //printf("high 0x%04X\n", high);
+
                     addr = (low | (high << 8)) + cpu.Yreq;
+
+                    //printf("addr 0x%04X\n", addr);
 
                     // implement the oops cycle on page change
                     // https://wiki.nesdev.com/w/index.php/CPU_addressing_modes
                     if( check_extra_cycle(instruct.instructionCode ) &&
-                            ((addr & 0xFF00) != (temp & 0xFF00)) ) {
+                            ((addr & 0xFF00) != (high << 8)) ) {
                         cpu.cycles += 1;
                     }
                     cpu.pc += 1;
@@ -462,9 +497,6 @@ cpu_clock() {
                 {
                     FETCH;
                     u16 temp = (u16)cpu.accumReq + (u16)fetched + (u16)cpu_get_flag(Carry);
-                    printf("Fetched %d , accum %d, get_carry %d get_u %d\n",
-                            (u16)cpu.accumReq, (u16)fetched, (u16)cpu_get_flag(Carry),
-                            (u16)cpu_get_flag(Unused));
 
                     cpu_set_flag(Carry, temp > 0xFF);
                     cpu_set_flag(Zero, temp == 0x0);
@@ -494,13 +526,16 @@ cpu_clock() {
             case ASL: //arithmetic shift left, C <- [76543210] <- 0
                 {
                     FETCH;
+                    //LOG("FETCHED 0x%04X", fetched);
                     u16 temp = ((u16)fetched) << 1;
+                    //LOG("temp 0x%04X", temp);
+
 
                     cpu_set_flag(Negative, temp & 0x80);
                     cpu_set_flag(Zero, temp == 0);
                     cpu_set_flag(Carry, (temp & 0x0100) > 0x0);
 
-                    if(instruct.addressMode == IMP && instruct.addressMode == ACCUM) {
+                    if(instruct.addressMode == IMP || instruct.addressMode == ACCUM) {
                         cpu.accumReq = (u8)temp;
                     } else {
                         bus_write8(addr, (u8)temp);
@@ -513,7 +548,7 @@ cpu_clock() {
                     if(cpu_get_flag(Carry) == 0) {
                         cpu.cycles += 1;
 
-                        if((cpu.pc ) && (addr & 0xFF00)) {
+                        if((cpu.pc ) && (addr & 0xFF00)) { //TODO wtf
                             cpu.cycles += 1;
                         }
                         cpu.pc = addr;
@@ -526,7 +561,7 @@ cpu_clock() {
                     if(cpu_get_flag(Carry) == 1) {
                         cpu.cycles += 1;
 
-                        if((cpu.pc ) && (addr & 0xFF00)) {
+                        if((cpu.pc ) && (addr & 0xFF00)) { //TODO wtf
                             cpu.cycles += 1;
                         }
                         cpu.pc = addr;
@@ -539,7 +574,7 @@ cpu_clock() {
                     if(cpu_get_flag(Zero) == 1) {
                         cpu.cycles += 1;
 
-                        if(cpu.pc && (addr & 0xFF00)) {
+                        if(cpu.pc && (addr & 0xFF00)) { //TODO wtf
                             cpu.cycles += 1;
                         }
                         cpu.pc = addr;
@@ -730,7 +765,7 @@ cpu_clock() {
                     // our actual instruction
                     cpu.pc -= 1;
 
-                    stack_push(cpu.pc);
+                    //stack_push(cpu.pc);
 
                     // push pc
                     stack_push( (cpu.pc >> 8) & 0x00FF );
@@ -765,13 +800,14 @@ cpu_clock() {
             case LSR: //logical shift right, 0 -> [76543210] -> C
                 {
                     FETCH;
+                    //printf("fetched %d\n", fetched);
                     u8 temp = fetched >> 1;
                     cpu_set_flag(Carry, fetched & 0x1);
                     cpu_set_flag(Negative, 0);
                     cpu_set_flag(Zero, temp == 0x0);
 
 
-                    if(instruct.addressMode == IMP && instruct.addressMode == ACCUM) {
+                    if(instruct.addressMode == IMP || instruct.addressMode == ACCUM) {
                         cpu.accumReq = temp;
                     } else {
                         bus_write8(addr, temp);
@@ -781,7 +817,7 @@ cpu_clock() {
             case NOP: //no operation
                 {
                     // TODO
-                    //ABORT("not legal instruction (NOP TODO implementation)");
+                    ABORT("not legal instruction (NOP TODO implementation)");
                 } break;
             case ORA: //or with accumulator,  A OR M -> A
                 {
@@ -818,7 +854,7 @@ cpu_clock() {
                     cpu_set_flag(Zero, temp & 0x00FF);
                     cpu_set_flag(Carry, (temp & 0xFF00) > 0);
 
-                    if(instruct.addressMode == IMP && instruct.addressMode == ACCUM) {
+                    if(instruct.addressMode == IMP || instruct.addressMode == ACCUM) {
                         cpu.accumReq = temp & 0x00FF;
                     } else {
                         bus_write8(addr, temp & 0x00FF);
@@ -834,7 +870,7 @@ cpu_clock() {
                     cpu_set_flag(Zero, temp & 0x00FF);
                     cpu_set_flag(Carry, fetched & 0x1);
 
-                    if(instruct.addressMode == IMP && instruct.addressMode == ACCUM) {
+                    if(instruct.addressMode == IMP || instruct.addressMode == ACCUM) {
                         cpu.accumReq = temp & 0x00FF;
                     } else {
                         bus_write8(addr, temp & 0x00FF);
@@ -847,7 +883,9 @@ cpu_clock() {
                 } break;
             case RTS: //return from subroutine
                 {
-                    cpu.pc = stack_pop();
+                    u16 low = stack_pop();
+                    u16 high = stack_pop();
+                    cpu.pc = low | (high << 8);
                     cpu.pc += 1;
                 } break;
             case SBC: //subtract with carry, A - M - (1 - C) -> A (1 - C is borrow bit)
@@ -936,9 +974,18 @@ cpu_clock() {
                     ABORT("Unknown instruction");
                 }
         }
+        //printf("cpu.instructionCount %d break %d\n", (int)cpu.instructionCount,
+        //        (int)instructionCountBreakPoint);
+        cpu.instructionCount++;
+
+        if(cpu.pc == breakpoint || cpu.instructionCount == instructionCountBreakPoint) {
+            LOG("breakpoint! %d %d", cpu.instructionCount, instructionCountBreakPoint);
+            debug = 0;
+        }
     }
 
     cpu.cycles -= 1;
+
 
     return ret;
 }

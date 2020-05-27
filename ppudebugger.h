@@ -42,7 +42,7 @@ ppu_debugger_draw() {
 
         nk_layout_row_static(ctx, 30, 100, 2);
         if(nk_button_symbol(ctx, NK_SYMBOL_TRIANGLE_LEFT)) {
-            palette--;
+            palette = palette == 0 ? 7 : palette - 1;
         }
         if(nk_button_symbol(ctx, NK_SYMBOL_TRIANGLE_RIGHT)) {
             palette++;

@@ -78,10 +78,11 @@ cartridge_load(const char* name) {
         data += TRAINER_SIZE;
     }
 
-    int high = header.flag7; // TODO check
-    int low = header.flag6;
+    //int high = header.flag7; // TODO check
+    //int low = header.flag6;
 
-    cartridge.mapperID = (high << 4) | low;
+    cartridge.mapperID =  ((header.flag6 & 0xF0) >> 4) | (header.flag7 & 0xF0);
+    // (high << 4) | low;
 
     // type 1 file format TODO rest of them
 
@@ -95,6 +96,13 @@ cartridge_load(const char* name) {
     data += cartridge.numProgramRoms * PROG_ROM_SINGLE_SIZE;
     memcpy(cartridge.characterMemory, data, cartridge.numCharacterRoms * CHAR_ROM_SINGLE_SIZE);
     data += cartridge.numCharacterRoms * CHAR_ROM_SINGLE_SIZE;
+
+    // print signature
+    char signatureName[4] = {};
+    memcpy(signatureName, &header.magic, sizeof(u32));
+    LOG("Cartridge signature %s", signatureName);
+    LOG("CHR ROM %d", header.charaterRomCount);
+    LOG("PRG ROM %d", header.programRomCount);
 
     switch(cartridge.mapperID) {
 
@@ -128,6 +136,7 @@ cartridge_cpu_write_rom(u16 addr, u8 val) {
     if(!mapper.cpu_translate_write) return;
 
     u16 actualAddr = mapper.cpu_translate_write(addr);
+    if(actualAddr == 0xFFFF) return;
     if(actualAddr >= cartridge.numProgramRoms * PROG_ROM_SINGLE_SIZE) ABORT("mem overflow");
 
     cartridge.programMemory[actualAddr] = val;

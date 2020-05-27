@@ -97,8 +97,8 @@ cpu_debugger_init(SDL_Window *win) {
             i++;
             high = bus_read8(i);
         }
-        else if( instruction.addressMode == IMP // || // fetch 0 addresses
-                //instruction.addressMode == ACCUM ||
+        else if( instruction.addressMode == IMP || // fetch 0 addresses
+                instruction.addressMode == ACCUM //||
                 //instruction.addressMode == IMM
                )
         {
@@ -307,10 +307,12 @@ cpu_memory_debugger() {
 static void
 cpu_intruction_debugger() {
 
-    if (nk_begin(ctx, "Cpu instructions Debugger", nk_rect(700, 0, 300, 800),
+    if (nk_begin(ctx, "Cpu instructions Debugger", nk_rect(700, 0, 300, 900),
                 NK_WINDOW_BORDER|NK_WINDOW_MOVABLE|NK_WINDOW_SCALABLE|
                 NK_WINDOW_MINIMIZABLE|NK_WINDOW_TITLE))
     {
+
+        u16 pc = cpu.pc;
         float ratio[] = {120, 150};
         nk_layout_row(ctx, NK_STATIC, 25, 2, ratio);
         static char peekString[64];
@@ -319,10 +321,37 @@ cpu_intruction_debugger() {
         nk_edit_string(ctx, NK_EDIT_SIMPLE, peekString, &peekLen, 5, nk_filter_hex);
         peekString[peekLen] = 0;
 
-        u16 pc = cpu.pc;
         if(peekLen != 0) {
             pc = (u16)strtol(peekString, NULL, 16);
         }
+        {
+            nk_layout_row(ctx, NK_STATIC, 25, 2, ratio);
+            static char breakString[64];
+            static int breakLen = 0;
+            nk_label(ctx, "Breakpoint:", NK_TEXT_LEFT);
+            nk_edit_string(ctx, NK_EDIT_SIMPLE, breakString, &breakLen, 5, nk_filter_hex);
+            breakString[breakLen] = 0;
+
+            if(breakLen != 0) {
+                breakpoint = (u16)strtol(breakString, NULL, 16);
+            }
+        }
+        {
+            nk_layout_row(ctx, NK_STATIC, 25, 2, ratio);
+            static char breakString[64] = "0";
+            static int breakLen = 1;
+            nk_label(ctx, "CountBreakPoint:", NK_TEXT_LEFT);
+            nk_edit_string(ctx, NK_EDIT_SIMPLE, breakString, &breakLen, 10, nk_filter_default);
+            breakString[breakLen] = 0;
+
+            if(breakLen != 0) {
+                instructionCountBreakPoint = (u16)strtol(breakString, NULL, 10);
+            } else {
+                instructionCountBreakPoint = 0;
+            }
+        }
+
+
 
         char reqString[64];
 
@@ -333,12 +362,23 @@ cpu_intruction_debugger() {
             int index = (pc - 15 + i) & 0xFFFF;
             sprintf ( reqString,"0x%04X", index);
             //bool selected = 0;
-            if(cpu.pc == index) {
+            if(index == breakpoint) {
 
                 int temp =  pc == index;
                 if(nk_selectable_label(ctx, reqString, NK_TEXT_LEFT, &temp)) {
                     sprintf ( peekString,"%X", index);
-                    printf("pressed\n");
+                    peekLen = strlen(peekString);
+                }
+
+                if(disassemblyTable[index]) {
+                    nk_label_colored(ctx, disassemblyTable[index], NK_TEXT_LEFT, nk_rgb(0, 0, 200));
+                }
+
+            } else if(cpu.pc == index) {
+
+                int temp =  pc == index;
+                if(nk_selectable_label(ctx, reqString, NK_TEXT_LEFT, &temp)) {
+                    sprintf ( peekString,"%X", index);
                     peekLen = strlen(peekString);
                 }
 
@@ -374,7 +414,7 @@ cpu_intruction_debugger() {
     nk_end(ctx);
 }
 
-int step = 0, debug = 0, frameSkip = 0, hide = 0;
+int step = 0, hide = 0;
 static void
 cpu_debugger_update() {
 
@@ -411,7 +451,6 @@ cpu_debugger_update() {
 
         nk_checkbox_label(ctx, "Debug", &debug);
         nk_checkbox_label(ctx, "Hide", &hide);
-        nk_checkbox_label(ctx, "frameSkip", &frameSkip);
     }
     nk_end(ctx);
 #endif
@@ -434,5 +473,4 @@ static void
 cpu_debugger_draw() {
     nk_sdl_render(NK_ANTI_ALIASING_ON, MAX_VERTEX_MEMORY, MAX_ELEMENT_MEMORY);
 }
-
-#endif /* CPUDEBUGGER_H */
+#endif

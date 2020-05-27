@@ -32,7 +32,7 @@ u16
 mapper0_cpu_write(u16 addr) {
 
     if(!address_is_between(addr, MAP0_START, MAP0_END))
-        return 0;
+        return 0xFFFF;
         //ABORT("invalid address in mapper0 0x%04X", addr);
 
     u16 ret = 0;
