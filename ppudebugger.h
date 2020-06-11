@@ -141,10 +141,112 @@ ppu_debugger_draw() {
 
     nk_end(ctx);
 
+    if (nk_begin(ctx, "PPU nametable debugger", nk_rect(0, 600, 790, 680),
+                NK_WINDOW_BORDER|NK_WINDOW_MOVABLE|NK_WINDOW_SCALABLE|
+                NK_WINDOW_MINIMIZABLE|NK_WINDOW_TITLE))
+    {
+        static u32 selectedAttribute = numeric_max_u32;
+        static u8  selectedAttributeValue = 0;
+        static u32 selectedAttributeIndex = numeric_max_u32;
+
+        nk_layout_row_static(ctx, 15, 200, 1);
+        switch(cartridge.mirrorType){
+            case VERTICAL:
+                {
+                    nk_label(ctx, "Vertical Mirroring", NK_TEXT_LEFT);
+                } break;
+            case HORIZONTAL:
+                {
+                    nk_label(ctx, "Horizontal Mirroring", NK_TEXT_LEFT);
+                } break;
+            default:
+                ABORT("unknown mirroring type");
+
+        }
+
+        nk_layout_row_static(ctx, 15, 200, 2);
+        static int active = 1;
+
+        active ^= 1;
+        if(nk_checkbox_label(ctx, "First", &active)) {
+            selectedAttribute = numeric_max_u32;
+            selectedAttributeValue = 0;
+        }
+        active ^= 1;
+        if(nk_checkbox_label(ctx, "Second", &active)) {
+            selectedAttribute = numeric_max_u32;
+            selectedAttributeValue = 0;
+        }
+
+        nk_layout_row_static(ctx, 15, 20, 32);
+
+        char tableIdString[32];
+        // BG IDs
+        for(u32 y = 0; y < 30; y++) {
+            u32 attributeY = y / 4;
+            for(u32 x = 0; x < 32; x++) {
+
+                u32 attributeX = x / 4;
+
+                sprintf(tableIdString, "%02X",
+                        ppu.nameTables[(NAMETABLE_SIZE * (active ^ 1)) + y * 32 + x]);
+
+                if((attributeY * (32 / 4) + attributeX) == selectedAttribute) {
+                    //[0x00][0x01]
+                    //[0x10][0x11]
+                    u32 temp = (((y / 2) & 0x1) << 1) |  (((x / 2) & 0x1));
+                    if(temp == selectedAttributeIndex) {
+                        nk_label_colored(ctx, tableIdString, NK_TEXT_LEFT, nk_rgb(0, 200, 200));
+                    } else {
+                        nk_label_colored(ctx, tableIdString, NK_TEXT_LEFT, nk_rgb(200, 200, 0));
+                    }
+                } else {
+                    nk_label(ctx, tableIdString, NK_TEXT_LEFT);
+                }
+
+            }
+        }
+
+        nk_layout_row_static(ctx, 15, 200, 1);
+        nk_label(ctx, "Attribute Table", NK_TEXT_LEFT);
+
+        nk_layout_row_static(ctx, 15, 20, 32);
+        // Palettes IDs
+        for(u32 y = 0; y < 2; y++) {
+            for(u32 x = 0; x < 32; x++) {
+                sprintf(tableIdString, "%02X",
+                        ppu.nameTables[(NAMETABLE_SIZE * (active ^ 1)) + (y + 30) * 32 + x]);
+                i32 selected = (y * 32 + x) == selectedAttribute;
+                //nk_label(ctx, tableIdString, NK_TEXT_LEFT);
+
+                if(nk_selectable_label(ctx, tableIdString, NK_TEXT_LEFT, &selected)) {
+                    //LOG("Attrinute table 0x0%X", y * 32 + x);
+                    selectedAttribute = selected ? (y * 32 + x) : numeric_max_u32;
+                    selectedAttributeValue = selected ?
+                        ppu.nameTables[(NAMETABLE_SIZE * (active ^ 1)) + (y + 30) * 32 + x] : 0;
+                }
+            }
+        }
+
+        char binaryText[32];
+        nk_layout_row_static(ctx, 15, 200, 1);
+        nk_label(ctx, "Attribute View", NK_TEXT_LEFT);
+        u8 tempAttribVal = selectedAttributeValue;
+
+        nk_layout_row_static(ctx, 15, 20, 2);
+        for(u32 i = 0; i < 4; i++) {
+            u8 paletteID = tempAttribVal & 0x3;
+            sprintf(binaryText, "%c%c", paletteID & 0x2 ? '1' : '0', paletteID & 0x1 ? '1' : '0');
+            i32 selected = i == selectedAttributeIndex;
+            if(nk_selectable_label(ctx, binaryText, NK_TEXT_LEFT, &selected)) {
+                selectedAttributeIndex = selected ? i : numeric_max_u32;
+            }
+            tempAttribVal >>= 2;
+        }
 
 
-
-
+    }
+    nk_end(ctx);
 }
 
 

@@ -2,21 +2,19 @@
  * Check license.txt in project root for license information *
  *********************************************************** */
 
-
 static u8 ppu_read(u16 addr);
-
 
 #ifndef PPU_H
 #define PPU_H
 
-#define NAMETABLE_SIZE  1024
-#define TEX_HEIGHT      256
-#define TEX_WIDTH       240
+#define NAMETABLE_SIZE                  0x400 // 1024
+#define TEX_HEIGHT                      256
+#define TEX_WIDTH                       240
 
-#define TILE_DIM        8
-#define NUM_TILES       16
+#define TILE_DIM                        8
+#define NUM_TILES                       16
 
-#define PPU_MAX_MEMORY_ADDR 0x3FFF
+#define PPU_MAX_MEMORY_ADDR             0x3FFF
 
 #define PPU_PATTERN_MEMORY_START        0x0
 #define PPU_PATTERN_MEMORY_END          0x1FFF
@@ -29,51 +27,68 @@ static u8 ppu_read(u16 addr);
 
 #include "cmath.h"
 
-static FILE* file;
-static int count;
-
 typedef struct ImageView {
     u8*     data;
     u32     w,h;
     GLuint  tex;
 } ImageView;
 
-
 // http://wiki.nesdev.com/w/index.php/PPU_registers
 typedef enum PPUStatus {
-    SpriteOverflow          = (1 << 5),
-    Sprite0Hit              = (1 << 6),
-    VerticalBlankStarted    = (1 << 7),
+    SpriteOverflow       = (1 << 5),
+    Sprite0Hit           = (1 << 6),
+    VerticalBlankStarted = (1 << 7),
 } PPUStatus ;
 
 typedef enum PPUMask {
-    GreyScale                   = (1 << 0),
-    BackgroungIn8MostLeft       = (1 << 1),
-    SpriteIn8MostLeft           = (1 << 2),
-    ShowBackground              = (1 << 3),
-    ShowSprites                 = (1 << 4),
-    EmphasizeRed                = (1 << 5),
-    EmphasizeGreen              = (1 << 6),
-    EmphasizeBlue               = (1 << 7)
+    GreyScale             = (1 << 0),
+    BackgroungIn8MostLeft = (1 << 1),
+    SpriteIn8MostLeft     = (1 << 2),
+    ShowBackground        = (1 << 3),
+    ShowSprites           = (1 << 4),
+    EmphasizeRed          = (1 << 5),
+    EmphasizeGreen        = (1 << 6),
+    EmphasizeBlue         = (1 << 7)
 } PPUMask ;
 
 typedef enum PPUController {
-    BaseNameTableAddress1       = (1 << 0),
-    BaseNameTableAddress2       = (1 << 1),
-    VramAddressIncrement        = (1 << 2), // (0: add 1, going across; 1: add 32, going down)
-    SpritePatterntableAddress   = (1 << 3),
-    BackgroundTableAddress      = (1 << 4),
-    SpriteSize                  = (1 << 5), // Sprite size (0: 8x8 pixels; 1: 8x16 pixels)
-    PPUMasterSlaveSelect        = (1 << 6), // 0: read backdrop from EXT pins;
+    BaseNameTableAddress1     = (1 << 0),
+    BaseNameTableAddress2     = (1 << 1),
+    VramAddressIncrement      = (1 << 2), // (0: add 1, going across; 1: add 32, going down)
+    SpritePatterntableAddress = (1 << 3),
+    BackgroundTableAddress    = (1 << 4),
+    SpriteSize                = (1 << 5), // Sprite size (0: 8x8 pixels; 1: 8x16 pixels)
+    PPUMasterSlaveSelect      = (1 << 6), // 0: read backdrop from EXT pins;
     // 1: output color on EXT pins
-    GenerateNMI                 = (1 << 7)
+    GenerateNMI               = (1 << 7)
 } PPUController ;
 
+//https://wiki.nesdev.com/w/index.php/PPU_scrolling
+
+//   First        Second
+//   |---------| |-------|
+//   0 0yy NN YY YYY XXXXX
+//     ||| || || ||| +++++-- coarse X scroll
+//     ||| || ++-+++-------- coarse Y scroll
+//     ||| ++--------------- nametable select
+//     +++------------------ fine Y scroll
+typedef union Loopy {
+    struct {
+        u16 coarseX : 5;
+        u16 coarseY : 5;
+        u16 nametableSelect : 2; // x and y nametables
+        u16 fineY : 3;
+    };
+
+    u16 reqister;
+} Loopy ;
+
+STATIC_ASSERT(sizeof(Loopy) == sizeof(u16), loopy_size_wrong);
 
 struct PPU {
     u8          nameTables[2 * NAMETABLE_SIZE]; // layout of background 0x2000 - 0x3F00
     u8          patternTables[2][4096];         // sprites 0x0 - 0x1FFF
-    u8          palette[32];                    // layout of background 0x3F00 - 0x3FFF
+    u8          palette[32];                    // color palette 0x3F00 - 0x3FFF
 
     // Viewable variables
     //u8      paletteView[0x40];
@@ -92,7 +107,25 @@ struct PPU {
 
     u8          dataAddrAccess;
     u8          internalDataBuffer;
-    u16         dataAddr; // PPUADDR / PPUDATA
+    //u16         dataAddr; // PPUADDR / PPUDATA
+
+    Loopy       loopyT; // Write reqister
+    Loopy       loopyV;
+
+    // Pixel offset
+    uint8_t     fineX;
+
+    // https://wiki.nesdev.com/w/images/d/d1/Ntsc_timing.png
+    // these are fetched for the rendering
+    u8          NTbyte;
+    u8          ATbyte;
+    u8          LowBGbyte;
+    u8          HighBGbyte;
+
+    u16         shifterLow;
+    u16         shifterHigh;
+    u16         paletteShifterHigh; // TODO rework
+    u16         paletteShifterLow;  // TODO rework
 
     u8          NMIGenerated; // TODO sould generate one in cpu write?
     // http://wiki.nesdev.com/w/index.php/PPU_registers#PPUCTRL
@@ -143,6 +176,38 @@ ppu_read(u16 addr) {
     } else if (address_is_between(addr,
                 PPU_NAMETABLE_MEMORY_START, PPU_NAMETABLE_MEMORY_END)) {
 
+        switch(cartridge.mirrorType){
+            case VERTICAL:
+                {
+                    //[0][1]
+                    //[0][1]
+                    u8 readAddr = addr % NAMETABLE_SIZE;
+
+                    if(addr < NAMETABLE_SIZE) {
+                        data = ppu.nameTables[readAddr];
+                    } else if(addr < NAMETABLE_SIZE * 2) {
+                        data = ppu.nameTables[NAMETABLE_SIZE + readAddr];
+                    }else if(addr < NAMETABLE_SIZE * 3) {
+                        data = ppu.nameTables[readAddr];
+                    } else {
+                        data = ppu.nameTables[NAMETABLE_SIZE + readAddr];
+                    }
+                } break;
+            case HORIZONTAL:
+                {
+                    //[0][0]
+                    //[1][1]
+                    u8 readAddr = addr % NAMETABLE_SIZE;
+                    if(addr < NAMETABLE_SIZE * 2) {
+                        data =  ppu.nameTables[readAddr];
+                    } else {
+                        data =  ppu.nameTables[NAMETABLE_SIZE + readAddr];
+                    }
+                } break;
+            default:
+                ABORT("unknown mirroring type");
+
+        }
 
     } else if (address_is_between(addr,
                 PPU_PALETTE_MEMORY_START, PPU_PALETTE_MEMORY_END)) {
@@ -154,12 +219,6 @@ ppu_read(u16 addr) {
         if (addr == 0x001C) addr = 0x000C;
 
         data = ppu.palette[addr];
-
-#ifdef COUNT
-        if(count >= 0xC) {
-            fprintf(file, "addr 0x%04X data 0x%04X\n", addr, data);
-        }
-#endif
 
     } else {
         data = cartridge_ppu_read_rom(addr);
@@ -185,29 +244,52 @@ ppu_write(u16 addr, u8 data) {
     } else if (address_is_between(addr,
                 PPU_NAMETABLE_MEMORY_START, PPU_NAMETABLE_MEMORY_END)) {
 
+
+        switch(cartridge.mirrorType){
+            case VERTICAL:
+                {
+                    //[0][1]
+                    //[0][1]
+                    u8 readAddr = addr % NAMETABLE_SIZE;
+
+                    LOG("writing to read addr! %d", readAddr);
+
+                    if(addr < NAMETABLE_SIZE) {
+                        ppu.nameTables[readAddr] = data ;
+                    } else if(addr < NAMETABLE_SIZE * 2) {
+                        ppu.nameTables[NAMETABLE_SIZE + readAddr] = data;
+                    }else if(addr < NAMETABLE_SIZE * 3) {
+                        ppu.nameTables[readAddr] = data;
+                    } else {
+                        ppu.nameTables[NAMETABLE_SIZE + readAddr] = data;
+                    }
+                } break;
+            case HORIZONTAL:
+                {
+
+                    //[0][0]
+                    //[1][1]
+                    u8 readAddr = addr % NAMETABLE_SIZE;
+
+                    if(addr < NAMETABLE_SIZE * 2) {
+                        ppu.nameTables[readAddr] = data;
+                    } else {
+                        ppu.nameTables[NAMETABLE_SIZE + readAddr] = data;
+                    }
+                } break;
+            default:
+                ABORT("unknown mirroring type");
+
+        }
+
     } else if (address_is_between(addr,
                 PPU_PALETTE_MEMORY_START, PPU_PALETTE_MEMORY_END)) {
 
-        u16 orgAdd = addr;
         addr &= 0x001F;
         if (addr == 0x0010) addr = 0x0000;
         if (addr == 0x0014) addr = 0x0004; // TODO check
         if (addr == 0x0018) addr = 0x0008;
         if (addr == 0x001C) addr = 0x000C;
-
-        LOG("writing to 0x%04X %d (org 0x%04X)", addr, data, orgAdd);
-#ifdef COUNT
-        if(++count >= 0xC && !file) {
-            LOG("Opened file!!!");
-            file = fopen("log.txt", "w");
-            return;
-        }
-#endif
-
-        if(++count >= 0xC + 3) {
-            exit(1);
-            return;
-        }
 
         ppu.palette[addr] = data;
     } else {
@@ -215,32 +297,218 @@ ppu_write(u16 addr, u8 data) {
     }
 }
 
+static inline void
+load_shifters() {
+    ppu.shifterLow = (ppu.shifterLow & 0xFF00) | ppu.LowBGbyte;
+    ppu.shifterHigh = (ppu.shifterHigh & 0xFF00) | ppu.HighBGbyte;
+
+    ppu.paletteShifterLow = (ppu.paletteShifterLow & 0xFF00) | (ppu.ATbyte & 0x1 ? 0x00FF : 0x0);
+    ppu.paletteShifterHigh = (ppu.paletteShifterHigh & 0xFF00) | (ppu.ATbyte & 0x2 ? 0x00FF : 0x0);
+
+    // TODO update palette
+}
+
+static inline Color
+ppu_palette_get_color(u8 pixel, u32 paletteIndex) {
+
+    u16 paletteLocation = PPU_PALETTE_MEMORY_START + (paletteIndex * 4) + pixel;
+    u8 data = ppu_read(paletteLocation);
+
+    return colors[data & 0x3F];
+}
+
+
 static void
 ppu_clock() {
 
+    CHECKLOG;
+
+#ifdef LOG
+    fprintf(logfile, "scanline %d cycle %d status %d mask %d control %d loopyT %d looyV %d\n",
+            ppu.scanline, ppu.cycle, ppu.statusReq, ppu.maskReq, ppu.controllerReq, ppu.loopyT.reqister,
+            ppu.loopyV.reqister);
+#endif
+
 #if 1
 
-    if(ppu.scanline == -1 && ppu.cycle == 1) {
-        ppu.statusReq &= ~VerticalBlankStarted;
+    // TODO reorder
+    if(ppu.scanline >= -1 && ppu.scanline < 240) { // out of vertical blank
+
+        if (ppu.scanline == 0 && ppu.cycle == 0)
+        {
+            // "Odd Frame" cycle skip
+            ppu.cycle = 1;
+        }
+
+        if(ppu.scanline == -1 && ppu.cycle == 1) {
+            ppu.statusReq &= ~VerticalBlankStarted;
+        }
+        /*between visible range or load next frames first */
+        if((ppu.cycle >= 2 && ppu.cycle < 258) || (ppu.cycle >= 321 && ppu.cycle < 338)) {
+
+            // update shifters
+            ppu.shifterLow <<= 1;
+            ppu.shifterHigh <<= 1;
+            // TODO attribute
+
+            ppu.paletteShifterLow <<= 1;
+            ppu.paletteShifterHigh <<= 1;
+
+            switch((ppu.cycle - 1) % 8) {
+                case 0: // NT byte
+                    {
+                        load_shifters(); // update last loaded values to shifters
+
+                        u16 patternIndex =  PPU_NAMETABLE_MEMORY_START + (ppu.loopyV.reqister & 0x0FFF);
+                        ppu.NTbyte = ppu_read(patternIndex); // TODO check
+                    } break;
+                case 2: // AT byte
+                    {
+                        u16 attributeIndex = ((ppu.loopyV.coarseY >> 2) << 3)// divide by 4
+                            | (ppu.loopyV.coarseX >> 2)                     // divide by 4
+                            | (ppu.loopyV.nametableSelect << 10);           //correct nametables (x and y)
+
+                        attributeIndex += 0x23C0; // starts at 23C0
+
+                        u8 tempPalettes = ppu_read(attributeIndex);// TODO check
+
+                        // determine which palette of 4 is used
+                        if(ppu.loopyV.coarseY & 0x2) tempPalettes >>= 4;
+                        if(ppu.loopyV.coarseX & 0x2) tempPalettes >>= 2;
+
+                        ppu.ATbyte = tempPalettes & 0x3;
+
+                    } break;
+                case 4: // Low BG byte
+                    {
+                        // which table
+                        u16 address = ppu.controllerReq & BackgroundTableAddress ? 0x1000 : 0x0;
+                        // TODO check
+                        address += ppu.NTbyte * 16; // tile is multiplied by size of tile
+                        address += ppu.loopyV.fineY; // 0 - 7 to height (smooth scrolling)
+                        ppu.LowBGbyte = ppu_read(address);
+                    } break;
+                case 6: // High BG byte
+                    {
+                        // which table
+                        u16 address = ppu.controllerReq & BackgroundTableAddress ? 0x1000 : 0x0;
+                        address += ppu.NTbyte * 16; // tile is multiplied by size of tile
+                        address += ppu.loopyV.fineY; // 0 - 7 to height (smooth scrolling)
+                        ppu.HighBGbyte = ppu_read(address + 8 /*high byte*/);
+                    } break;
+                case 7: // inc hori V
+                    {
+                        if(ppu.maskReq & (ShowBackground | ShowSprites)) { //TODO check place
+                            if(ppu.loopyV.coarseX == 31) { // wrap around to next table
+                                ppu.loopyV.coarseX = 0;
+                                ppu.loopyV.nametableSelect ^= 0x1; //change nametable X
+                            } else {
+                                ppu.loopyV.coarseX += 1;
+                            }
+                        }
+                    } break;
+            }
+        }
+
+        if(ppu.cycle == 256) {
+            // increment cource Y
+            if(ppu.maskReq & (ShowBackground | ShowSprites)) { //TODO check place
+                if(ppu.loopyV.fineY < 7) {
+                    ppu.loopyV.fineY += 1;
+                } else {
+                    ASSERT_MESSAGE((u16)ppu.loopyV.coarseY < 30u,
+                            "coarse Y overflow! %d", (u16)ppu.loopyV.coarseY);
+
+                    if(ppu.loopyV.coarseY == 29) { // wrap around
+                        ppu.loopyV.coarseY = 0;
+                        ppu.loopyV.nametableSelect ^= 0x2; //change nametable y
+                    } else {
+                        ppu.loopyV.coarseY += 1;
+                    }
+                }
+            }
+        }
+
+        if(ppu.cycle == 257) { // hori (v) = hori (t)
+            // load shifters
+            load_shifters();
+            // reset X
+            if(ppu.maskReq & (ShowBackground | ShowSprites)) { //TODO check place
+                ppu.loopyV.nametableSelect |= (ppu.loopyT.nametableSelect & 0x1); // set nametable X
+                ppu.loopyV.coarseX = ppu.loopyT.coarseX;
+            }
+        }
+
+        // TODO remove and test
+        if(ppu.cycle == 338 || ppu.cycle == 340) {
+            ppu.NTbyte = ppu_read(PPU_NAMETABLE_MEMORY_START + (ppu.loopyV.reqister & 0x0FFF));
+        }
+
+
+        if(ppu.scanline == -1 && ppu.cycle >= 280 && ppu.cycle >= 304) {
+            // Reset Y
+            if(ppu.maskReq & (ShowBackground | ShowSprites)) { //TODO check place
+                ppu.loopyV.nametableSelect |= (ppu.loopyT.nametableSelect & 0x2); // set nametable Y
+                ppu.loopyV.coarseY = ppu.loopyT.coarseY;
+                ppu.loopyV.fineY = ppu.loopyT.fineY;
+            }
+        }
     }
 
+    // out of visible area
     if(ppu.scanline == 241 && ppu.cycle == 1) {
         ppu.statusReq |= VerticalBlankStarted;
         if(ppu.controllerReq & GenerateNMI) {
             ppu.NMIGenerated = 1;
         }
     }
+
+    if((ppu.cycle - 1) >= 0 && (ppu.cycle - 1) < TEX_WIDTH &&
+            ppu.scanline >= 0 && ppu.scanline < TEX_HEIGHT) {
+
+
+        // render / put pixel
+        u8 pixel = 0;
+        u8 palette = 0;
+        if(ppu.maskReq & ShowBackground) {
+
+            u16 mux = 0x8000 >> ppu.fineX;
+
+            uint8_t bit1 = (ppu.shifterLow & mux) > 0;
+            uint8_t bit2 = (ppu.shifterHigh & mux) > 0;
+
+            pixel = (bit2 << 1) | bit1;
+
+            bit1 = (ppu.paletteShifterLow & mux) > 0;
+            bit2 = (ppu.paletteShifterHigh & mux) > 0;
+
+            palette = (bit2 << 1) | bit1;
+        }
+
+        Color color = ppu_palette_get_color(pixel, palette);
+
+        //LOG("y %d x %d", ppu.scanline, ppu.cycle - 1);
+
+        memcpy(&ppu.screen.data[(ppu.scanline * TEX_WIDTH + (ppu.cycle - 1)) * 3] ,
+                &color, sizeof(Color));
+
+    }
+
+    // update cycle
     ppu.cycle++;
     if (ppu.cycle >= 341)
     {
         ppu.cycle = 0;
         ppu.scanline++;
-        if (ppu.scanline >= 261)
+        if (ppu.scanline >= 261) // TODO wrong??
         {
             ppu.scanline = -1;
             ppu.frameComplete = 1;
         }
     }
+
+
+
 #else
     ppu.cycle++;
 
@@ -263,35 +531,19 @@ ppu_clock() {
 #endif
 }
 
-static inline Color
-ppu_palette_get_color(u8 pixel, u32 paletteIndex) {
-
-    u16 paletteLocation = PPU_PALETTE_MEMORY_START + (paletteIndex * 4) + pixel;
-#ifdef COUNT
-    if(count >= 0xC) {
-        fprintf(file,"location 0x%04X\n", paletteLocation );
-    }
-#endif
-    u8 data = ppu_read(paletteLocation);
-
-#ifdef COUNT
-    //if(data >= SIZEOF_ARRAY(colors)) ABORT("Color mem overflow");
-    Color RERERE = colors[data & 0x3F];
-    if(count >= 0xC) {
-        fprintf(file,"color %d %d %d\n", RERERE.r, RERERE.g, RERERE.b);
-    }
-#endif
-    return colors[data & 0x3F];
-}
-
 static void
 ppu_cpu_write(u16 addr, u8 data) {
+
+    ASSERT_MESSAGE( (addr >= 0x2000 && addr <= 0x2007) || addr == 0x4014,
+            "Incorrect ppu write 0x%04X", addr);
+
     addr &= 0x7;
 
     switch(addr) {
         case 0x0: //PPUCTRL
             {
                 ppu.controllerReq = data;
+                ppu.loopyT.nametableSelect = ppu.controllerReq & 0x3;
                 // TODO should generate NMI if in vertical blank?
             } break;
         case 0x1: //PPUMASK
@@ -312,20 +564,38 @@ ppu_cpu_write(u16 addr, u8 data) {
             } break;
         case 0x5: //PPUSCROLL
             {
+                if(ppu.dataAddrAccess) {
+                    //2005 first write:
+                    //t:0000000000011111=d:11111000
+                    //x=d:00000111
 
+                    ppu.fineX = data & 0x07; //(8 sprite lenght) TODO assert ?
+                    ppu.loopyT.coarseX = data >> 3;
+                } else {
+                    //2005 second write:
+                    //t:0000001111100000=d:11111000
+                    //t:0111000000000000=d:00000111
+                    ppu.loopyT.fineY = data & 0x07;
+                    ppu.loopyT.coarseY = data >> 3;
+                }
+
+                ppu.dataAddrAccess ^= 0x1;
             } break;
         case 0x6: //PPUADDR
             {
-                ppu.dataAddr = ppu.dataAddrAccess ?
-                    (ppu.dataAddr & 0xFF00) | data :
-                    (ppu.dataAddr & 0x00FF) | (data << 8);
+                ppu.loopyT.reqister = ppu.dataAddrAccess ?
+                    (ppu.loopyT.reqister & 0xFF00) | data :
+                    (ppu.loopyT.reqister & 0x00FF) | (data << 8);
+
+                // if full address range written update vram address
+                if(ppu.dataAddrAccess) ppu.loopyV = ppu.loopyT;
 
                 ppu.dataAddrAccess ^= 0x1;
             } break;
         case 0x7: //PPUDATA
             {
-                ppu_write(ppu.dataAddr, data);
-                ppu.dataAddr += ppu.controllerReq & VramAddressIncrement ? 32 : 1;
+                ppu_write(ppu.loopyV.reqister, data);
+                ppu.loopyV.reqister += ppu.controllerReq & VramAddressIncrement ? 32 : 1;
             } break;
         default:
             {
@@ -343,11 +613,11 @@ ppu_cpu_read(u16 addr) {
             {
                 ret = ppu.statusReq;
                 ppu.statusReq &= ~VerticalBlankStarted;
-                ppu.dataAddr = 0;
+                //ppu.dataAddr = 0; //TODO
             } break;
         case 0x7: //PPUDATA
             {
-                if(address_is_between(ppu.dataAddr,
+                if(address_is_between(ppu.loopyV.reqister,
                             PPU_PALETTE_MEMORY_START, PPU_PALETTE_MEMORY_END)) {
                     // The palette data is placed immediately on the data bus,
                     // and hence no dummy read is required.
@@ -355,7 +625,7 @@ ppu_cpu_read(u16 addr) {
                     // but the data placed in it is the mirrored nametable data that would appear
                     // "underneath" the palette.
 
-                    ret = ppu.internalDataBuffer = ppu_read(ppu.dataAddr);
+                    ret = ppu.internalDataBuffer = ppu_read(ppu.loopyV.reqister);
                 } else {
                     // When reading while the VRAM address is in the range 0-$3EFF
                     // (i.e., before the palettes),
@@ -367,10 +637,10 @@ ppu_cpu_read(u16 addr) {
                     // Thus, after setting the VRAM address,
                     // one should first read this register and discard the result.
                     ret = ppu.internalDataBuffer;
-                    ppu.internalDataBuffer = ppu_read(ppu.dataAddr);
+                    ppu.internalDataBuffer = ppu_read(ppu.loopyV.reqister);
                 }
 
-                ppu.dataAddr += ppu.controllerReq & VramAddressIncrement ? 32 : 1;
+                ppu.loopyV.reqister += ppu.controllerReq & VramAddressIncrement ? 32 : 1;
 
             } break;
         default:
@@ -383,18 +653,8 @@ ppu_cpu_read(u16 addr) {
 
 static void
 ppu_render_patterntable(u8 index, u32 paletteIndex) { // there is 2 pattern tables so this is 0 or 1
-#ifdef COUNT
-    if(count >= 0xC) {
-        fprintf(file, "starting to read\n");
-    }
-#endif
 
     for(u16 tileY = 0; tileY < NUM_TILES; tileY++) { // FOR TILE Y
-#ifdef COUNT
-        if(count >= 0xC) {
-            fprintf(file, "Ytile %d\n", tileY);
-        }
-#endif
 
         for(u16 tileX = 0; tileX < NUM_TILES; tileX++) { // FOR TILE X
 
@@ -429,12 +689,6 @@ ppu_render_patterntable(u8 index, u32 paletteIndex) { // there is 2 pattern tabl
             }
         }
     }
-#ifdef COUNT
-    if(count >= 0xC) {
-        fclose(file);
-        exit(1);
-    }
-#endif
 }
 
 static ImageView
@@ -473,7 +727,7 @@ shader_compile(GLenum type, const char* source) {
 
     GLuint shader = glCreateShader(type);
     if (shader == 0) {
-        printf("Failed to create shader\n");
+        LOG("Failed to create shader");
     }
 
     GLCHECK(glShaderSource(shader, 1, &source, NULL));
@@ -488,7 +742,7 @@ shader_compile(GLenum type, const char* source) {
         {
             char* infoLog = (char*)malloc(sizeof(char) * infoLen);
             GLCHECK(glGetShaderInfoLog(shader, infoLen, NULL, infoLog));
-            printf("Error compiling shader :\n%s\n", infoLog);
+            LOG("Error compiling shader :\n%s", infoLog);
             free(infoLog);
         }
         GLCHECK(glDeleteShader(shader));
@@ -515,25 +769,26 @@ unsigned int indices[] = {
 static void
 ppu_init() {
 
-    memset(ppu.screen.data, 200, ppu.screen.w * ppu.screen.h * sizeof(Color));
+    memset(&ppu, 0, sizeof(struct PPU));
 
+    memset(ppu.screen.data, 200, ppu.screen.w * ppu.screen.h * sizeof(Color));
     size_t size = 0;
     char* vs = load_file("vert.sha", &size);
     if(!vs) {
-        printf("failed to load vert.sha\n");
+        LOG("failed to load vert.sha");
         exit(EXIT_FAILURE);
     }
-    printf("%s\n", vs);
+    LOG("%s", vs);
 
     GLuint vert = shader_compile(GL_VERTEX_SHADER, vs);
     free(vs);
 
     char* fs = load_file("frag.sha", &size);
     if(!fs) {
-        printf("failed to load vert.sha\n");
+        LOG("failed to load vert.sha");
         exit(EXIT_FAILURE);
     }
-    printf("%s\n", fs);
+    LOG("%s", fs);
 
     GLuint frag = shader_compile(GL_FRAGMENT_SHADER, fs);
     free(fs);
@@ -548,13 +803,13 @@ ppu_init() {
 
     ppu.transformLoc = glGetUniformLocation(ppu.renderProgram, "transform");
     if(ppu.transformLoc == -1) {
-        printf("didnt find transform location\n");
+        LOG("didnt find transform location");
         exit(1);
     }
 
     ppu.projectionLoc = glGetUniformLocation(ppu.renderProgram, "projection");
     if(ppu.projectionLoc == -1) {
-        printf("didnt find projection location\n");
+        LOG("didnt find projection location");
         exit(1);
     }
 
@@ -595,53 +850,11 @@ ppu_init() {
 
     GLCHECK(glEnable(GL_DEPTH_TEST));
     GLCHECK(glDepthMask(GL_FALSE));
-
 }
 
 static void
 ppu_render() {
 
     imageview_update(&ppu.screen);
-
-#if 0
-    glViewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
-    //glClearColor(1.f, 0.f, 1.f, 0.f);
-    //glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glDisable(GL_DEPTH_TEST);
-    // Draw all
-    GLCHECK(glUseProgram(ppu.renderProgram));
-
-    mat4 projection;
-
-    identify_mat4(&projection);
-#if 1
-    orthomat(&projection, 0.0f,
-            (float)SCREEN_WIDTH,
-            (float)SCREEN_HEIGHT,
-            0.0f, 0.1f, 100.f);
-#endif
-
-    GLCHECK(glUniformMatrix4fv(ppu.projectionLoc, 1, GL_FALSE, (float*)&projection));
-
-    mat4 trans;
-    create_translation_mat_inside(&trans,
-            (vec3){ (float)TEX_WIDTH / 2.0 , (float)TEX_HEIGHT / 2.0, 1});
-
-    mat4 scaling;
-    identify_mat4(&scaling);
-    create_scaling_mat4(&scaling, (vec3) {TEX_WIDTH, TEX_HEIGHT , 1});
-
-
-    mat4 transform;
-    identify_mat4(&transform);
-    mat4_mult_mat4(&transform, &trans, &scaling);
-
-    GLCHECK(glUniformMatrix4fv(ppu.transformLoc, 1, GL_FALSE, (float*)&transform));
-
-    glBindTexture(GL_TEXTURE_2D, ppu.renderTexture);
-    glBindVertexArray(ppu.vao);
-
-    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
-#endif
 }
 #endif /* PPU_H */

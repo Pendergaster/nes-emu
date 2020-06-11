@@ -27,7 +27,7 @@ static const u64 numeric_max_u64 = 0xFFFFFFFFFFFFFFFF;
 
 #define VA_ARGS(...) , ##__VA_ARGS__
 
-// #define free(PTR) do{free((PTR));(PTR) = NULL;}while(0)
+//#define free(PTR) do{free((PTR));(PTR) = NULL;}while(0)
 
 #define PTR_CAST(TYPE, VAL) (((union {typeof(VAL) src; TYPE dst;}*)(&VAL))->dst)
 
@@ -86,5 +86,11 @@ glCheckError_(const char *file, int line) {
 #define GLCHECK(FUN) do{FUN; glCheckError_(__FILE__, __LINE__); } while(0)
 
 
+static FILE* logfile;
+#ifndef LOG
+#define CHECKLOG if(!logfile){ printf("log file opened!\n"); logfile = fopen("logfile.txt", "w");}
+#else
+#define CHECKLOG
+#endif
 
 #endif // UTILSDEFS

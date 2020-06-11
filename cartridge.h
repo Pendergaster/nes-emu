@@ -10,13 +10,22 @@
 // Because we dont know before hand which mapper will be used
 // this structure will store mapper functions
 
-struct Cartridge {
-    u8* characterMemory;
-    u8* programMemory;
+typedef enum MirrorType {
+    HORIZONTAL,
+    VERTICAL,
+    ONESCREEN_LO, // TODO ??
+    ONESCREEN_HI, // TODO ??
+} MirrorType;
 
-    u32 mapperID;
-    u32 numProgramRoms;
-    u32 numCharacterRoms;
+struct Cartridge {
+    u8*         characterMemory;
+    u8*         programMemory;
+
+    u32         mapperID;
+    u32         numProgramRoms;
+    u32         numCharacterRoms;
+
+    MirrorType  mirrorType;
 } cartridge;
 
 
@@ -82,6 +91,9 @@ cartridge_load(const char* name) {
     //int low = header.flag6;
 
     cartridge.mapperID =  ((header.flag6 & 0xF0) >> 4) | (header.flag7 & 0xF0);
+
+    cartridge.mirrorType = header.flag6 & 0x1 ? VERTICAL : HORIZONTAL;
+
     // (high << 4) | low;
 
     // type 1 file format TODO rest of them

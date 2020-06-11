@@ -328,35 +328,26 @@ cpu_clock() {
 
     if(cpu.cycles == 0) {
         u8 opcode = bus_read8(cpu.pc);
-#if 0
-        static int count;
-        static FILE* file;
 
-        if (!file)  {
-            file = fopen("log.txt", "w");
-        }
+        CHECKLOG;
 
-        fprintf(file,"opcode 0x%04X pc 0x%04X accum 0x%04X\n",
-                opcode, cpu.pc, cpu.accumReq);
-
-        if(count++ > 1000000) {
-            fclose(file);
-            exit(1);
-        }
+#ifdef LOG
+        fprintf(logfile, "opcode 0x%04X pc 0x%04X accum 0x%04X, Yreq 0x%04X opcount %ld\n",
+                opcode, cpu.pc, cpu.accumReq, cpu.Yreq, cpu.instructionCount);
 #endif
+        //if(cpu.instructionCount == 10000) {
+        //    fclose(logfile);
+        //    exit(1);
+        //}
+
         cpu.pc += 1;
 
         Instruction instruct = instructionTable[opcode];
         cpu.cycles = instruct.cycles;
 
-        printf("instruction 0x%04X, pc 0x%04X opcode 0x%04X, accum 0x%04X , yreq 0x%04X , count %ld\n",
-               instruct.instructionCode , cpu.pc - 1, opcode, cpu.accumReq,
-               cpu.Yreq, cpu.instructionCount);
-
-        //if(cpu.instructionCount > 1000) {
-        //    exit(1);
-        //}
-
+#ifdef LOG
+        fprintf(logfile, "cpu temp %d\n", cpu.cycles);
+#endif
         u16 addr = 0;
         u8 fetched = 0;
         // fetch required data
@@ -465,17 +456,11 @@ cpu_clock() {
                 {
                     u16 ptr = (u16)bus_read8(cpu.pc);
 
-                    //printf("ptr 0x%04X\n", ptr);
-                    //printf("Yreq 0x%04X\n", cpu.Yreq);
 
                     u16 low = bus_read8(ptr & 0xFF); // TODO jotain on vaarin
-                    //printf("low 0x%04X\n", low);
                     u16 high = bus_read8((ptr + 1) & 0xFF); // TODO jotain on vaarin
-                    //printf("high 0x%04X\n", high);
 
                     addr = (low | (high << 8)) + cpu.Yreq;
-
-                    //printf("addr 0x%04X\n", addr);
 
                     // implement the oops cycle on page change
                     // https://wiki.nesdev.com/w/index.php/CPU_addressing_modes
@@ -526,10 +511,7 @@ cpu_clock() {
             case ASL: //arithmetic shift left, C <- [76543210] <- 0
                 {
                     FETCH;
-                    //LOG("FETCHED 0x%04X", fetched);
                     u16 temp = ((u16)fetched) << 1;
-                    //LOG("temp 0x%04X", temp);
-
 
                     cpu_set_flag(Negative, temp & 0x80);
                     cpu_set_flag(Zero, temp == 0);
@@ -548,7 +530,7 @@ cpu_clock() {
                     if(cpu_get_flag(Carry) == 0) {
                         cpu.cycles += 1;
 
-                        if((cpu.pc ) && (addr & 0xFF00)) { //TODO wtf
+                        if((cpu.pc & 0xFF00) != (addr & 0xFF00)) { //TODO wtf
                             cpu.cycles += 1;
                         }
                         cpu.pc = addr;
@@ -561,7 +543,7 @@ cpu_clock() {
                     if(cpu_get_flag(Carry) == 1) {
                         cpu.cycles += 1;
 
-                        if((cpu.pc ) && (addr & 0xFF00)) { //TODO wtf
+                        if((cpu.pc & 0xFF00) != (addr & 0xFF00)) { //TODO wtf
                             cpu.cycles += 1;
                         }
                         cpu.pc = addr;
@@ -574,7 +556,7 @@ cpu_clock() {
                     if(cpu_get_flag(Zero) == 1) {
                         cpu.cycles += 1;
 
-                        if(cpu.pc && (addr & 0xFF00)) { //TODO wtf
+                        if((cpu.pc & 0xFF00) != (addr & 0xFF00)) { //TODO wtf
                             cpu.cycles += 1;
                         }
                         cpu.pc = addr;
@@ -800,7 +782,6 @@ cpu_clock() {
             case LSR: //logical shift right, 0 -> [76543210] -> C
                 {
                     FETCH;
-                    //printf("fetched %d\n", fetched);
                     u8 temp = fetched >> 1;
                     cpu_set_flag(Carry, fetched & 0x1);
                     cpu_set_flag(Negative, 0);
@@ -974,14 +955,15 @@ cpu_clock() {
                     ABORT("Unknown instruction");
                 }
         }
-        //printf("cpu.instructionCount %d break %d\n", (int)cpu.instructionCount,
-        //        (int)instructionCountBreakPoint);
         cpu.instructionCount++;
 
         if(cpu.pc == breakpoint || cpu.instructionCount == instructionCountBreakPoint) {
             LOG("breakpoint! %d %d", cpu.instructionCount, instructionCountBreakPoint);
             debug = 0;
         }
+#ifdef LOG
+        fprintf(logfile, "cpu cycle %d\n", cpu.cycles);
+#endif
     }
 
     cpu.cycles -= 1;

@@ -74,7 +74,7 @@ cpu_debugger_init(SDL_Window *win) {
     for(int i = 0; i <= 0xFFFF; i++) {
         char* disassembly = malloc(32);
         int line = i;
-        u8 opcode = bus_read8(i);
+        u8 opcode = 0; //bus_read8(i); //TODO fix
 
         Instruction instruction = instructionTable[opcode];
         u16 low = 0x0;
@@ -92,10 +92,10 @@ cpu_debugger_init(SDL_Window *win) {
           ) {
 
             i++;
-            low = bus_read8(i);
+            low = 0; //bus_read8(i); // TODO fix
 
             i++;
-            high = bus_read8(i);
+            high = 0;//bus_read8(i); // TODO fix
         }
         else if( instruction.addressMode == IMP || // fetch 0 addresses
                 instruction.addressMode == ACCUM //||
@@ -109,7 +109,7 @@ cpu_debugger_init(SDL_Window *win) {
         else // fetch low adress
         {
             i++;
-            low = bus_read8(i);
+            low = 0;// bus_read8(i); // TODO fix
         }
 
         u16 holeAddr = (high << 8) | low;
@@ -176,7 +176,7 @@ cpu_memory_debugger() {
 
     bg.r = 0.10f, bg.g = 0.18f, bg.b = 0.24f, bg.a = 1.0f;
 
-    if (nk_begin(ctx, "Cpu Memory Debugger", nk_rect(0, 0, 700, 800),
+    if (nk_begin(ctx, "Cpu Memory Debugger", nk_rect(0, 0, 625, 650),
                 NK_WINDOW_BORDER|NK_WINDOW_MOVABLE|NK_WINDOW_SCALABLE|
                 NK_WINDOW_MINIMIZABLE|NK_WINDOW_TITLE))
     {
@@ -259,7 +259,7 @@ cpu_memory_debugger() {
             }
             i32 selected = (int)page == i;
 
-            sprintf ( hexString,"0x%X", (bus_read8( (page << 8) | i ) & 0xFFFF ));
+            sprintf ( hexString,"0x%X", (/*bus_read8( (page << 8) | i ) & 0xFFFF TODO fix*/ 0 ));
             if(nk_selectable_label(ctx, hexString, NK_TEXT_LEFT, &selected)) {
                 printf("page is 0x0%X\n", i);
                 page = i;
@@ -307,7 +307,7 @@ cpu_memory_debugger() {
 static void
 cpu_intruction_debugger() {
 
-    if (nk_begin(ctx, "Cpu instructions Debugger", nk_rect(700, 0, 300, 900),
+    if (nk_begin(ctx, "Cpu instructions Debugger", nk_rect(625, 0, 300, 900),
                 NK_WINDOW_BORDER|NK_WINDOW_MOVABLE|NK_WINDOW_SCALABLE|
                 NK_WINDOW_MINIMIZABLE|NK_WINDOW_TITLE))
     {

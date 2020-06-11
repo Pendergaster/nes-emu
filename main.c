@@ -23,7 +23,7 @@ const u32 SCREEN_WIDTH = 1800, SCREEN_HEIGHT = 1000;
 
 
 int
-main() {
+main(int argc, char** argv) {
     printf("hello\n");
 
     SDL_Init( SDL_INIT_VIDEO );
@@ -65,8 +65,11 @@ main() {
     cpu_load_rom(rom, romi, 0x08000);
     LOG_COLOR(CONSOLE_COLOR_BLUE ,"rom loaded");
 #endif
-
-    cartridge_load("roms/nestest.nes");
+    if(argc == 2) {
+        cartridge_load(argv[1]);
+    } else {
+        cartridge_load("roms/nestest.nes");
+    }
     cpu_reset();
 
     LOG_COLOR(CONSOLE_COLOR_BLUE ,"cpu debugger init");
@@ -81,8 +84,6 @@ main() {
     SDL_Event event;
     LOG("All initialized");
     LOG_COLOR(CONSOLE_COLOR_GREEN ,"All initialized");
-
-    //exit(1);
 
     LOG("All initialized");
 
@@ -107,26 +108,19 @@ main() {
 
         if(debug == 0) { //debug update
             if(step) {
-                if (frameSkip) {
-                    do {
-                        ppu_clock();
-                        if(updateCounter % 3 == 0) {
-                            cpu_clock();
-                        }
-                        updateCounter += 1;
-                    } while(ppu.frameComplete == 0);
-                } else {
-                    u8 updated = 0;
-                    do {
-                        ppu_clock();
-                        if(updateCounter % 3 == 0) {
-                            updated = cpu_clock();
-                        }
+                u8 updated = 0;
+                do {
+                    ppu_clock();
+                    if(updateCounter % 3 == 0) {
+                        updated = cpu_clock();
+                    }
+                    if(ppu.NMIGenerated == 1) {
+                        ppu.NMIGenerated = 0;
+                        cpu_no_mask_iterrupt();
+                    }
 
-                        updateCounter += 1;
-                    } while(updated != 1);
-                }
-
+                    updateCounter += 1;
+                } while(updated != 1);
             }
             step = 0;
         } else { //normal update
@@ -135,9 +129,12 @@ main() {
                 if(updateCounter % 3 == 0) {
                     cpu_clock();
                 }
-
+                if(ppu.NMIGenerated == 1) {
+                    ppu.NMIGenerated = 0;
+                    cpu_no_mask_iterrupt();
+                }
                 updateCounter += 1;
-            } while(ppu.frameComplete == 0);
+            } while(ppu.frameComplete == 0 && debug == 1);
             ppu.frameComplete = 0;
         }
         cpu_debugger_update();
