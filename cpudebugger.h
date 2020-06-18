@@ -414,7 +414,7 @@ cpu_intruction_debugger() {
     nk_end(ctx);
 }
 
-int step = 0, hide = 0;
+int step = 0, hide = 0, frameSkip = 0;
 static void
 cpu_debugger_update() {
 
@@ -449,7 +449,14 @@ cpu_debugger_update() {
             }
         }
 
-        nk_checkbox_label(ctx, "Debug", &debug);
+        if(nk_checkbox_label(ctx, "Debug", &debug)) {
+            frameSkip = 0;
+        }
+
+        if(nk_checkbox_label(ctx, "FrameSkip", &frameSkip)) {
+            debug = 0;
+        }
+
         nk_checkbox_label(ctx, "Hide", &hide);
     }
     nk_end(ctx);

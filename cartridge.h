@@ -130,22 +130,32 @@ cartridge_load(const char* name) {
     free(to_free);
 }
 
-u16
+u8
 cartridge_cpu_read_rom(u16 addr) {
 
-    if(!mapper.cpu_translate_read) return 0;
+    if(!mapper.cpu_translate_read) ABORT("Mapper not set");
 
     u16 actualAddr = mapper.cpu_translate_read(addr);
+
+    if(actualAddr == 0xFFFF) return 0;
+
     if(actualAddr >= cartridge.numProgramRoms * PROG_ROM_SINGLE_SIZE) ABORT("mem overflow");
 
-    return cartridge.programMemory[actualAddr];
+    u8 data = cartridge.programMemory[actualAddr];
+    CHECKLOG;
+
+#ifdef LOGFILE
+    fprintf(logfile, "mapper fetched 0X%04X from addr 0X%04X\n", data, actualAddr);
+#endif
+
+    return data;
 }
 
 
 void
 cartridge_cpu_write_rom(u16 addr, u8 val) {
 
-    if(!mapper.cpu_translate_write) return;
+    if(!mapper.cpu_translate_write) ABORT("Mapper not set");
 
     u16 actualAddr = mapper.cpu_translate_write(addr);
     if(actualAddr == 0xFFFF) return;

@@ -134,7 +134,7 @@ const u64 extraCycleFlags =
 
 static inline u8
 check_extra_cycle(Instructions opcode) {
-    return extraCycleFlags & ((u64)1 << opcode);
+    return extraCycleFlags & (/*(u64)1 << */opcode);
 }
 
 typedef struct cpu2ao3 {
@@ -156,7 +156,7 @@ typedef struct cpu2ao3 {
 
 // global cpu variable
 cpu2ao3 cpu = {
-    .Xreq = 0, .Yreq = 0, .accumReq = 0, .flags = Unused, .pc = 0x0, // pc is read from program start ptr
+    .Xreq = 0, .Yreq = 0, .accumReq = 0, .flags = 0, .pc = 0x0, // pc is read from program start ptr
     .stackPointer = STACK_SIZE, .cycles = 0
 };
 
@@ -176,7 +176,7 @@ cpu_get_flag(CpuStatus flag) {
 
 // Instruction, addressmode, cycles TODO clean unknown ones
 #define INSTRUCTION_TABLE(FN) \
-    FN(BRK , IMM, 7) FN(ORA, INDX, 6) FN(XXX, IMP, 2) FN(XXX, IMP, 8) FN(NOP, IMP, 3) FN(ORA, ZPX, 3) FN(ASL, ZPX, 5) FN(XXX, IMP, 5) FN(PHP, IMP, 3) FN(ORA, IMM, 2) FN(ASL, IMP, 2) FN(XXX, IMP, 2) FN(NOP, IMP, 4) FN(ORA, ABS, 4) FN(ASL, ABS, 6) FN(XXX, IMP, 6) \
+    FN(BRK , IMM, 7) FN(ORA, INDX, 6) FN(XXX, IMP, 2) FN(XXX, IMP, 8) FN(NOP, IMP, 3) FN(ORA, ZP, 3) FN(ASL, ZP, 5) FN(XXX, IMP, 5) FN(PHP, IMP, 3) FN(ORA, IMM, 2) FN(ASL, IMP, 2) FN(XXX, IMP, 2) FN(NOP, IMP, 4) FN(ORA, ABS, 4) FN(ASL, ABS, 6) FN(XXX, IMP, 6) \
     \
     FN(BPL, REL, 2) FN(ORA, INDY, 5) FN(XXX, IMP, 2) FN(XXX, IMP, 8) FN(NOP, IMP, 4) FN(ORA, ZPX, 4) FN(ASL, ZPX, 6) FN(XXX, IMP, 6) FN(CLC, IMP, 2) FN(ORA, ABSY, 4) FN(NOP, IMP, 2) FN(XXX, IMP, 7) FN(NOP, IMP, 4) FN(ORA, ABSX, 4) FN(ASL, ABSX, 7) FN(XXX, IMP, 7) \
     \
@@ -242,7 +242,7 @@ stack_push (u8 val) {
 static inline u8
 stack_pop () {
 
-    if(cpu.stackPointer == STACK_SIZE) ABORT("stack underflow\n");
+    if(cpu.stackPointer == STACK_SIZE) ABORT("stack underflow");
 
     cpu.stackPointer += 1;
     return bus_read8(STACK_START + cpu.stackPointer);
@@ -270,11 +270,17 @@ cpu_iterrupt_request() { //irq
 
         // https://www.pagetable.com/?p=410
         cpu_set_flag(DisableIterups, 1);
-        cpu_set_flag(Break, 0); // TODO has to be set??
-        cpu_set_flag(Unused, 1); // TODO has to be set??
+
+        //  op      Unused and Break    After push
+        //  PHP     11                  None
+        //  BRK     11                  Break is set to 1
+        //  IRQ     10                  Break is set to 1
+        //  NMI     10                  Break is set to 1
+
+        cpu_set_flag(Break, 1); // TODO has to be set??
 
         // TODO flags before or after?
-        stack_push(cpu.flags);
+        stack_push(cpu.flags | Unused);
 
         // read new pc
         cpu.pc = bus_read16(IRQ_OR_BRK_PC_LOCATION);
@@ -286,21 +292,29 @@ cpu_iterrupt_request() { //irq
 static void
 cpu_no_mask_iterrupt() { //nmi
 
+    //  op      Unused and Break    After push
+    //  PHP     11                  None
+    //  BRK     11                  Break is set to 1
+    //  IRQ     10                  Break is set to 1
+    //  NMI     10                  Break is set to 1
+
     stack_push( (cpu.pc >> 8) & 0xFF );
     stack_push( cpu.pc & 0xFF );
 
     // https://www.pagetable.com/?p=410
     cpu_set_flag(DisableIterups, 1);
+
     cpu_set_flag(Break, 0); // TODO has to be set??
-    cpu_set_flag(Unused, 1); // TODO has to be set??
 
     // TODO flags before or after?
-    stack_push(cpu.flags);
+    stack_push(cpu.flags | Unused);
+
+    cpu_set_flag(Break, 1); // TODO has to be set??
 
     // read new pc
     cpu.pc = bus_read16(NMI_PC_LOCATION);
 
-    cpu.cycles += 8;
+    cpu.cycles = 8;
 }
 
 static void
@@ -331,10 +345,10 @@ cpu_clock() {
 
         CHECKLOG;
 
-#ifdef LOG
-        fprintf(logfile, "opcode 0x%04X pc 0x%04X accum 0x%04X, Yreq 0x%04X opcount %ld\n",
-                opcode, cpu.pc, cpu.accumReq, cpu.Yreq, cpu.instructionCount);
-#endif
+//#ifdef LOGFILE
+        LOG("opcode 0x%04X pc 0x%04X accum 0x%04X, Yreq 0x%04X Xreq 0x%04X opcount %ld",
+                opcode, cpu.pc, cpu.accumReq, cpu.Yreq, cpu.Xreq, cpu.instructionCount);
+//#endif
         //if(cpu.instructionCount == 10000) {
         //    fclose(logfile);
         //    exit(1);
@@ -345,9 +359,6 @@ cpu_clock() {
         Instruction instruct = instructionTable[opcode];
         cpu.cycles = instruct.cycles;
 
-#ifdef LOG
-        fprintf(logfile, "cpu temp %d\n", cpu.cycles);
-#endif
         u16 addr = 0;
         u8 fetched = 0;
         // fetch required data
@@ -373,6 +384,9 @@ cpu_clock() {
             case ZP: // zero page addressing
                 {
                     addr = bus_read8(cpu.pc);
+#ifdef LOGFILE
+                    fprintf(logfile, "ZP addr 0x%04X\n", addr);
+#endif
                     cpu.pc += 1;
                 } break;
             case ZPX: // zero page addressing with x
@@ -397,6 +411,9 @@ cpu_clock() {
                 {
                     addr = bus_read16(cpu.pc);
                     cpu.pc += 2;
+#ifdef LOGFILE
+                    fprintf(logfile, "ABS cycles %d\n", cpu.cycles);
+#endif
                 } break;
             case ABSX:
                 {
@@ -456,7 +473,6 @@ cpu_clock() {
                 {
                     u16 ptr = (u16)bus_read8(cpu.pc);
 
-
                     u16 low = bus_read8(ptr & 0xFF); // TODO jotain on vaarin
                     u16 high = bus_read8((ptr + 1) & 0xFF); // TODO jotain on vaarin
 
@@ -481,11 +497,13 @@ cpu_clock() {
             case ADC: //add with carry A + M + C -> A, C
                 {
                     FETCH;
+                    //LOG("ADC accum 0x%04X, fetched 0x%04X, carry 0x%04X",
+                            //cpu.accumReq, fetched, cpu_get_flag(Carry));
                     u16 temp = (u16)cpu.accumReq + (u16)fetched + (u16)cpu_get_flag(Carry);
 
                     cpu_set_flag(Carry, temp > 0xFF);
-                    cpu_set_flag(Zero, temp == 0x0);
-                    cpu_set_flag(Negative, (temp & 0x80) == 0x80);
+                    cpu_set_flag(Zero, (temp & 0x00FF) == 0x0);
+                    cpu_set_flag(Negative, temp & 0x80);
 
                     // check overflow
                     // (2 positives result negative) and (2 negatives result positive)
@@ -514,8 +532,8 @@ cpu_clock() {
                     u16 temp = ((u16)fetched) << 1;
 
                     cpu_set_flag(Negative, temp & 0x80);
-                    cpu_set_flag(Zero, temp == 0);
-                    cpu_set_flag(Carry, (temp & 0x0100) > 0x0);
+                    cpu_set_flag(Zero, (temp & 0xFF) == 0);
+                    cpu_set_flag(Carry, (temp & 0x0100) > 0);
 
                     if(instruct.addressMode == IMP || instruct.addressMode == ACCUM) {
                         cpu.accumReq = (u8)temp;
@@ -562,14 +580,14 @@ cpu_clock() {
                         cpu.pc = addr;
                     }
                 } break;
-            case BIT: // bit test, A AND M, M7 -> N, M6 -> V (V=overflow)
+            case BIT: // bit test, A AND M, M7 -> N, M6 -> V (V = overflow)
                 // bits 7 and 6 of operand are transfered to bit 7 and 6 of SR (N,V);
                 // the zeroflag is set to the result of operand AND accumulator.
                 {
                     FETCH;
                     u8 temp = cpu.accumReq & fetched;
-                    cpu_set_flag(Negative, (temp & (1 << 7)) > 0);
-                    cpu_set_flag(Overflow, (temp & (1 << 6)) > 0);
+                    cpu_set_flag(Negative, fetched & 0x80);
+                    cpu_set_flag(Overflow, fetched & 0x40);
                     cpu_set_flag(Zero, temp == 0x0);
                 } break;
             case BMI: //branch on minus (negative set)
@@ -579,7 +597,7 @@ cpu_clock() {
                     if(cpu_get_flag(Negative) == 1) {
                         cpu.cycles += 1;
 
-                        if((cpu.pc) && (addr & 0xFF00)) {
+                        if((cpu.pc & 0xFF00) != (addr & 0xFF00)) {
                             cpu.cycles += 1;
                         }
                         cpu.pc = addr;
@@ -592,7 +610,7 @@ cpu_clock() {
                     if(cpu_get_flag(Zero) == 0) {
                         cpu.cycles += 1;
 
-                        if((cpu.pc ) && (addr & 0xFF00)) {
+                        if((cpu.pc & 0xFF00) != (addr & 0xFF00)) {
                             cpu.cycles += 1;
                         }
                         cpu.pc = addr;
@@ -605,7 +623,7 @@ cpu_clock() {
                     if(cpu_get_flag(Negative) == 0) {
                         cpu.cycles += 1;
 
-                        if( (cpu.pc) && (addr & 0xFF00) ) {
+                        if( (cpu.pc & 0xFF00) != (addr & 0xFF00) ) {
                             cpu.cycles += 1;
                         }
                         cpu.pc = addr;
@@ -613,12 +631,21 @@ cpu_clock() {
                 } break;
             case BRK: //break interrupt, push PC+2, push SR
                 {
+                    //  op      Unused and Break    After push
+                    //  PHP     11                  None
+                    //  BRK     11                  Break is set to 1
+                    //  IRQ     10                  Break is set to 1
+                    //  NMI     10                  Break is set to 1
+
                     stack_push( (cpu.pc >> 8) & 0xFF );
                     stack_push( cpu.pc & 0xFF );
 
                     cpu_set_flag(Break, 1);
 
+                    stack_push(cpu.flags | Unused);
+
                     cpu.pc = bus_read16(IRQ_OR_BRK_PC_LOCATION);
+
                 } break;
             case BVC: //branch on overflow clear
                 {
@@ -627,7 +654,7 @@ cpu_clock() {
                     if(cpu_get_flag(Overflow) == 0) {
                         cpu.cycles += 1;
 
-                        if( (cpu.pc) && (addr & 0xFF00) ) {
+                        if( (cpu.pc & 0xFF00) != (addr & 0xFF00) ) {
                             cpu.cycles += 1;
                         }
                         cpu.pc = addr;
@@ -640,7 +667,7 @@ cpu_clock() {
                     if(cpu_get_flag(Overflow) == 1) {
                         cpu.cycles += 1;
 
-                        if( (cpu.pc) && (addr & 0xFF00) ) {
+                        if( (cpu.pc & 0xFF00) != (addr & 0xFF00) ) {
                             cpu.cycles += 1;
                         }
                         cpu.pc = addr;
@@ -667,7 +694,8 @@ cpu_clock() {
             case CMP: //compare (with accumulator) A - M
                 {
                     FETCH;
-                    u8 temp = (u16)cpu.accumReq - (u16)fetched;
+                    u16 temp = (u16)cpu.accumReq - (u16)fetched;
+
                     cpu_set_flag(Carry, cpu.accumReq >= fetched);
                     cpu_set_flag(Negative, temp  & 0x0080);
                     cpu_set_flag(Zero, (temp & 0x00FF) == 0x0);
@@ -691,10 +719,11 @@ cpu_clock() {
             case DEC: //decrement, M - 1 -> M or (A - 1 ?? TODO)
                 {
                     FETCH;
-                    u8 temp = fetched - 1;
+                    //LOG("DEC fetched 0x%04X addr 0x%04X flags 0x%04X", fetched, addr, cpu.flags);
+                    u16 temp = fetched - 1;
                     cpu_set_flag(Negative, temp & 0x80);
-                    cpu_set_flag(Zero, temp == 0x0);
-                    bus_write8(addr, temp);
+                    cpu_set_flag(Zero, (temp & 0x00FF) == 0);
+                    bus_write8(addr, temp & 0x00FF);
                 } break;
             case DEX: //decrement X, X - 1 -> X
                 {
@@ -722,7 +751,7 @@ cpu_clock() {
                     bus_write8(addr, temp & 0x00FF);
 
                     cpu_set_flag(Negative, temp & 0x0080);
-                    cpu_set_flag(Zero, temp == 0x0);
+                    cpu_set_flag(Zero, (temp & 0xFF) == 0x0);
                 } break;
             case INX: //increment X, X + 1 -> X
                 {
@@ -774,10 +803,13 @@ cpu_clock() {
             case LDY: //load Y
                 {
                     FETCH;
+                    //LOG("LDY Y req 0x%04X Fetched 0x%04X flags 0x%04X", cpu.Yreq, fetched, cpu.flags);
                     cpu.Yreq = fetched;
 
                     cpu_set_flag(Negative, cpu.Yreq & 0x0080);
                     cpu_set_flag(Zero, cpu.Yreq == 0x0);
+
+                    //LOG("flags 0x%04X", cpu.flags);
                 } break;
             case LSR: //logical shift right, 0 -> [76543210] -> C
                 {
@@ -798,15 +830,19 @@ cpu_clock() {
             case NOP: //no operation
                 {
                     // TODO
-                    ABORT("not legal instruction (NOP TODO implementation)");
+                    //ABORT("not legal instruction (NOP TODO implementation)");
                 } break;
             case ORA: //or with accumulator,  A OR M -> A
                 {
                     FETCH;
-                    cpu.accumReq |= 1;
+                    cpu.accumReq |= fetched;
 
                     cpu_set_flag(Negative, cpu.accumReq & 0x0080);
                     cpu_set_flag(Zero, cpu.accumReq == 0x0);
+
+#ifdef LOGFILE
+                    fprintf(logfile, "ORA cycles %d\n", cpu.cycles);
+#endif
                 } break;
             case PHA: //push accumulator
                 {
@@ -814,7 +850,19 @@ cpu_clock() {
                 } break;
             case PHP: //push processor status (SR)
                 {
-                    stack_push(cpu.flags);
+                    // In the byte pushed, bit 5 is always set to 1,
+                    // and bit 4 is 1 if from an instruction (PHP or BRK)
+
+                    //  op      Unused and Break    After push
+                    //  PHP     11                  None
+                    //  BRK     11                  Break is set to 1
+                    //  IRQ     10                  Break is set to 1
+                    //  NMI     10                  Break is set to 1
+
+                    stack_push(cpu.flags | Break | Unused);
+
+                    cpu_set_flag(Break, 0);
+                    //cpu_set_flag(Unused, 0); // TODO
                 } break;
             case PLA: //pull accumulator
                 {
@@ -829,10 +877,13 @@ cpu_clock() {
             case ROL: //rotate left,  C <- [76543210] <- C (M or A)
                 {
                     FETCH;
+
+                    //LOG("ROL fetched 0x%04X carry 0x%04X", fetched, cpu_get_flag(Carry));
+
                     u16 temp = (u16)((fetched << 1) | cpu_get_flag(Carry));
 
                     cpu_set_flag(Negative, temp & 0x0080);
-                    cpu_set_flag(Zero, temp & 0x00FF);
+                    cpu_set_flag(Zero, (temp & 0x00FF) == 0x0);
                     cpu_set_flag(Carry, (temp & 0xFF00) > 0);
 
                     if(instruct.addressMode == IMP || instruct.addressMode == ACCUM) {
@@ -848,7 +899,7 @@ cpu_clock() {
                     u16 temp = (u16)((fetched >> 1) | (cpu_get_flag(Carry) << 7));
 
                     cpu_set_flag(Negative, temp & 0x0080);
-                    cpu_set_flag(Zero, temp & 0x00FF);
+                    cpu_set_flag(Zero, (temp & 0x00FF) == 0x0);
                     cpu_set_flag(Carry, fetched & 0x1);
 
                     if(instruct.addressMode == IMP || instruct.addressMode == ACCUM) {
@@ -873,20 +924,26 @@ cpu_clock() {
                 {
                     // same as ADC but with inverted M
                     FETCH;
+
                     fetched ^= 0xFF;
 
+                    // TODO fix
                     u16 temp = (u16)cpu.accumReq + (u16)fetched + (u16)cpu_get_flag(Carry);
+
                     cpu_set_flag(Carry, temp > 0xFF);
-                    cpu_set_flag(Zero, temp == 0x0);
+                    cpu_set_flag(Zero, (temp & 0x00FF) == 0x0);
                     cpu_set_flag(Negative, (temp & 0x80) == 0x80);
 
                     // check overflow
                     // (2 positives result negative) and (2 negatives result positive)
                     // so if two high bits are same on operants and different on result set it
+
+                    // TODO check
                     cpu_set_flag(Overflow, (cpu.accumReq ^ (u8)(temp & 0x00FF)) &
                             (fetched ^ (u8)(temp & 0x00FF)) & 0x80);
 
                     cpu.accumReq = temp & 0x00FF;
+
                 } break;
             case SEC: //set carry
                 {
@@ -894,7 +951,8 @@ cpu_clock() {
                 } break;
             case SED: //set decimal
                 {
-                    ABORT("Set decimal should not be called!");
+                    cpu_set_flag(DecimalMode, 1);
+                    //ABORT("Set decimal should not be called!");
                 } break;
             case SEI: //set interrupt disable
                 {
@@ -938,6 +996,7 @@ cpu_clock() {
                 } break;
             case TXS: //transfer X to stack pointer, X -> SP
                 {
+                    //LOG("TXS stack pointer 0x%04x xreq 0x%04x", cpu.stackPointer, cpu.Xreq);
                     cpu.stackPointer = cpu.Xreq;
                 } break;
             case TYA: //transfer Y to accumulator, Y -> A
@@ -948,7 +1007,7 @@ cpu_clock() {
                 } break;
             case XXX: // Unknown
                 {
-                    ABORT("not legal instruction");
+                    //ABORT("not legal instruction");
                 } break;
             default:
                 {
@@ -961,7 +1020,7 @@ cpu_clock() {
             LOG("breakpoint! %d %d", cpu.instructionCount, instructionCountBreakPoint);
             debug = 0;
         }
-#ifdef LOG
+#ifdef LOGFILE
         fprintf(logfile, "cpu cycle %d\n", cpu.cycles);
 #endif
     }

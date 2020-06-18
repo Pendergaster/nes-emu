@@ -85,12 +85,14 @@ glCheckError_(const char *file, int line) {
 #define gl_check_error() glCheckError_(__FILE__, __LINE__)
 #define GLCHECK(FUN) do{FUN; glCheckError_(__FILE__, __LINE__); } while(0)
 
+//#define LOGFILE
 
+#ifdef LOGFILE
 static FILE* logfile;
-#ifndef LOG
-#define CHECKLOG if(!logfile){ printf("log file opened!\n"); logfile = fopen("logfile.txt", "w");}
+static int numWritten;
+#define CHECKLOG {if(numWritten++ > 1000000){fclose(logfile); exit(1);} if(!logfile){  printf("log file opened!\n"); logfile = fopen("logfile.txt", "w");}}
 #else
 #define CHECKLOG
 #endif
 
-#endif // UTILSDEFS
+#endif

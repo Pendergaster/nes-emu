@@ -8,8 +8,8 @@ static u8 ppu_read(u16 addr);
 #define PPU_H
 
 #define NAMETABLE_SIZE                  0x400 // 1024
-#define TEX_HEIGHT                      256
-#define TEX_WIDTH                       240
+#define TEX_HEIGHT                      240
+#define TEX_WIDTH                       256
 
 #define TILE_DIM                        8
 #define NUM_TILES                       16
@@ -163,6 +163,9 @@ ppu_read(u16 addr) {
     u8 data = 0x00;
     addr &= PPU_MAX_MEMORY_ADDR;
 
+#ifdef LOGFILE
+    u16 realAddr = addr;
+#endif
     if(address_is_between(addr,
                 PPU_PATTERN_MEMORY_START, PPU_PATTERN_MEMORY_END)) {
 
@@ -181,7 +184,13 @@ ppu_read(u16 addr) {
                 {
                     //[0][1]
                     //[0][1]
-                    u8 readAddr = addr % NAMETABLE_SIZE;
+
+                    addr &= 0x0FFF;
+                    u16 readAddr = addr % NAMETABLE_SIZE;
+
+#ifdef LOGFILE
+                    fprintf(logfile, "VERTICAL 0x%04X\n", addr);
+#endif
 
                     if(addr < NAMETABLE_SIZE) {
                         data = ppu.nameTables[readAddr];
@@ -197,11 +206,22 @@ ppu_read(u16 addr) {
                 {
                     //[0][0]
                     //[1][1]
-                    u8 readAddr = addr % NAMETABLE_SIZE;
+                    addr &= 0x0FFF;
+#ifdef LOGFILE
+    fprintf(logfile, "HORIZONTAL 0x%04X\n", addr);
+#endif
+                    u16 readAddr = addr % NAMETABLE_SIZE;
                     if(addr < NAMETABLE_SIZE * 2) {
                         data =  ppu.nameTables[readAddr];
+
+#ifdef LOGFILE
+                        fprintf(logfile, "read addr 0x%04X\n", readAddr);
+#endif
                     } else {
                         data =  ppu.nameTables[NAMETABLE_SIZE + readAddr];
+#ifdef LOGFILE
+                        fprintf(logfile, "read addr 0x%04X\n", NAMETABLE_SIZE + readAddr);
+#endif
                     }
                 } break;
             default:
@@ -218,11 +238,15 @@ ppu_read(u16 addr) {
         if (addr == 0x0018) addr = 0x0008;
         if (addr == 0x001C) addr = 0x000C;
 
-        data = ppu.palette[addr];
+        data = ppu.palette[addr] & 0x3F;
 
     } else {
         data = cartridge_ppu_read_rom(addr);
     }
+
+#ifdef LOGFILE
+    fprintf(logfile, "ppu red 0x%04X from 0x%04X\n", data, realAddr);
+#endif
 
     return data;
 }
@@ -241,6 +265,8 @@ ppu_write(u16 addr, u8 data) {
 
         ppu.patternTables[table][tableIndex] = data;
 
+        //cartridge_ppu_write_rom(addr, data);
+
     } else if (address_is_between(addr,
                 PPU_NAMETABLE_MEMORY_START, PPU_NAMETABLE_MEMORY_END)) {
 
@@ -250,9 +276,9 @@ ppu_write(u16 addr, u8 data) {
                 {
                     //[0][1]
                     //[0][1]
-                    u8 readAddr = addr % NAMETABLE_SIZE;
 
-                    LOG("writing to read addr! %d", readAddr);
+                    addr &= 0x0FFF;
+                    u16 readAddr = addr % NAMETABLE_SIZE;
 
                     if(addr < NAMETABLE_SIZE) {
                         ppu.nameTables[readAddr] = data ;
@@ -269,7 +295,8 @@ ppu_write(u16 addr, u8 data) {
 
                     //[0][0]
                     //[1][1]
-                    u8 readAddr = addr % NAMETABLE_SIZE;
+                    addr &= 0x0FFF;
+                    u16 readAddr = addr % NAMETABLE_SIZE;
 
                     if(addr < NAMETABLE_SIZE * 2) {
                         ppu.nameTables[readAddr] = data;
@@ -284,6 +311,10 @@ ppu_write(u16 addr, u8 data) {
 
     } else if (address_is_between(addr,
                 PPU_PALETTE_MEMORY_START, PPU_PALETTE_MEMORY_END)) {
+
+#ifdef LOGFILE
+        fprintf(logfile, "palette write 0x%04X from 0x%04X\n", data, addr);
+#endif
 
         addr &= 0x001F;
         if (addr == 0x0010) addr = 0x0000;
@@ -323,7 +354,7 @@ ppu_clock() {
 
     CHECKLOG;
 
-#ifdef LOG
+#ifdef LOGFILE
     fprintf(logfile, "scanline %d cycle %d status %d mask %d control %d loopyT %d looyV %d\n",
             ppu.scanline, ppu.cycle, ppu.statusReq, ppu.maskReq, ppu.controllerReq, ppu.loopyT.reqister,
             ppu.loopyV.reqister);
@@ -419,9 +450,14 @@ ppu_clock() {
                     ASSERT_MESSAGE((u16)ppu.loopyV.coarseY < 30u,
                             "coarse Y overflow! %d", (u16)ppu.loopyV.coarseY);
 
+
+                    ppu.loopyV.fineY = 0;
+
                     if(ppu.loopyV.coarseY == 29) { // wrap around
                         ppu.loopyV.coarseY = 0;
                         ppu.loopyV.nametableSelect ^= 0x2; //change nametable y
+                    } else if (ppu.loopyV.coarseY == 31){
+                        ppu.loopyV.coarseY = 0;
                     } else {
                         ppu.loopyV.coarseY += 1;
                     }
@@ -434,7 +470,7 @@ ppu_clock() {
             load_shifters();
             // reset X
             if(ppu.maskReq & (ShowBackground | ShowSprites)) { //TODO check place
-                ppu.loopyV.nametableSelect |= (ppu.loopyT.nametableSelect & 0x1); // set nametable X
+                ppu.loopyV.nametableSelect = (ppu.loopyV.nametableSelect & 0x2) | (ppu.loopyT.nametableSelect & 0x1); // set nametable X
                 ppu.loopyV.coarseX = ppu.loopyT.coarseX;
             }
         }
@@ -448,7 +484,7 @@ ppu_clock() {
         if(ppu.scanline == -1 && ppu.cycle >= 280 && ppu.cycle >= 304) {
             // Reset Y
             if(ppu.maskReq & (ShowBackground | ShowSprites)) { //TODO check place
-                ppu.loopyV.nametableSelect |= (ppu.loopyT.nametableSelect & 0x2); // set nametable Y
+                ppu.loopyV.nametableSelect = (ppu.loopyT.nametableSelect & 0x2) | (ppu.loopyV.nametableSelect & 0x1); // set nametable Y
                 ppu.loopyV.coarseY = ppu.loopyT.coarseY;
                 ppu.loopyV.fineY = ppu.loopyT.fineY;
             }
@@ -463,10 +499,12 @@ ppu_clock() {
         }
     }
 
-    if((ppu.cycle - 1) >= 0 && (ppu.cycle - 1) < TEX_WIDTH &&
-            ppu.scanline >= 0 && ppu.scanline < TEX_HEIGHT) {
+    if((ppu.cycle - 1) >= 0 && (ppu.cycle - 1) < ((TEX_WIDTH)) &&
+            ppu.scanline >= 0 && ppu.scanline < (TEX_HEIGHT)) {
 
-
+#ifdef LOGFILE
+        fprintf(logfile, "rendering\n");
+#endif
         // render / put pixel
         u8 pixel = 0;
         u8 palette = 0;
@@ -483,19 +521,33 @@ ppu_clock() {
             bit2 = (ppu.paletteShifterHigh & mux) > 0;
 
             palette = (bit2 << 1) | bit1;
+
+#ifdef LOGFILE
+            fprintf(logfile, "pixel palette 0x%04X 0x%04X\n", pixel, palette);
+#endif
         }
 
-        Color color = ppu_palette_get_color(pixel, palette);
 
         //LOG("y %d x %d", ppu.scanline, ppu.cycle - 1);
 
-        memcpy(&ppu.screen.data[(ppu.scanline * TEX_WIDTH + (ppu.cycle - 1)) * 3] ,
-                &color, sizeof(Color));
+#ifdef LOGFILE
+        fprintf(logfile, "rendering to %d %d %d\n",
+                ppu.scanline, ppu.cycle, (ppu.scanline * TEX_WIDTH + (ppu.cycle - 1)));
+#endif
 
+        Color color = ppu_palette_get_color(pixel, palette);
+        memcpy(ppu.screen.data + (ppu.scanline * TEX_WIDTH + (ppu.cycle - 1)) * 3,
+                &color, sizeof(u8) * 3);
+
+#ifdef LOGFILE
+        fprintf(logfile, "rendering done\n");
+#endif
     }
 
     // update cycle
     ppu.cycle++;
+
+    static u64 temp = 0;
     if (ppu.cycle >= 341)
     {
         ppu.cycle = 0;
@@ -506,8 +558,7 @@ ppu_clock() {
             ppu.frameComplete = 1;
         }
     }
-
-
+    temp++;
 
 #else
     ppu.cycle++;
@@ -564,7 +615,11 @@ ppu_cpu_write(u16 addr, u8 data) {
             } break;
         case 0x5: //PPUSCROLL
             {
-                if(ppu.dataAddrAccess) {
+                if(ppu.dataAddrAccess == 0) {
+
+#ifdef LOGFILE
+                    fprintf(logfile, "latch 1 \n");
+#endif
                     //2005 first write:
                     //t:0000000000011111=d:11111000
                     //x=d:00000111
@@ -572,6 +627,9 @@ ppu_cpu_write(u16 addr, u8 data) {
                     ppu.fineX = data & 0x07; //(8 sprite lenght) TODO assert ?
                     ppu.loopyT.coarseX = data >> 3;
                 } else {
+#ifdef LOGFILE
+                    fprintf(logfile, "latch 0 \n");
+#endif
                     //2005 second write:
                     //t:0000001111100000=d:11111000
                     //t:0111000000000000=d:00000111
@@ -602,6 +660,10 @@ ppu_cpu_write(u16 addr, u8 data) {
                 ABORT("unknown ppu write");
             } break;
     }
+
+#ifdef LOGFILE
+        fprintf(logfile, "wrote 0x%04X to 0x%04X\n", data, addr);
+#endif
 }
 
 static u8
@@ -653,7 +715,7 @@ ppu_cpu_read(u16 addr) {
 
 static void
 ppu_render_patterntable(u8 index, u32 paletteIndex) { // there is 2 pattern tables so this is 0 or 1
-
+#ifndef LOGFILE
     for(u16 tileY = 0; tileY < NUM_TILES; tileY++) { // FOR TILE Y
 
         for(u16 tileX = 0; tileX < NUM_TILES; tileX++) { // FOR TILE X
@@ -683,18 +745,19 @@ ppu_render_patterntable(u8 index, u32 paletteIndex) { // there is 2 pattern tabl
                     Color color = ppu_palette_get_color(pixel, paletteIndex);
 
                     // Draw the pixel
-                    memcpy(ppu.pattern[index].data + (imageY * ppu.pattern[index].w + imageX) * sizeof(Color),
-                            &color, sizeof(Color));
+                    memcpy(ppu.pattern[index].data + (imageY * ppu.pattern[index].w + imageX) *
+                            (sizeof(u8) * 3), &color, (sizeof(u8) * 3));
                 }
             }
         }
     }
+#endif
 }
 
 static ImageView
 imageview_create(u32 w, u32 h) {
 
-    ImageView ret = { .w = w, .h = h, .data = calloc(w * h, sizeof(Color))};
+    ImageView ret = { .w = w, .h = h, .data = calloc(w * h, sizeof(u8) * 3)};
     GLCHECK(glGenTextures(1, &ret.tex));
     GLCHECK(glBindTexture(GL_TEXTURE_2D, ret.tex));
 
@@ -771,7 +834,7 @@ ppu_init() {
 
     memset(&ppu, 0, sizeof(struct PPU));
 
-    memset(ppu.screen.data, 200, ppu.screen.w * ppu.screen.h * sizeof(Color));
+    //memset(ppu.screen.data, 200, ppu.screen.w * ppu.screen.h * (sizeof(u8) * 3));
     size_t size = 0;
     char* vs = load_file("vert.sha", &size);
     if(!vs) {

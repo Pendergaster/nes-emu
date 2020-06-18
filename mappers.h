@@ -11,11 +11,11 @@
 #define MAP0_END                0xFFFF
 #define MAP0_PPU_DATA_SIZE      0x1FFF
 
-u16
+u16 // 0xFFFF Err
 mapper0_cpu_read(u16 addr) {
 
     if(!address_is_between(addr, MAP0_START, MAP0_END)) {
-        return 0;
+        return 0xFFFF;
         //ABORT("invalid address in mapper0 0x%04X", addr);
     }
 
@@ -56,9 +56,7 @@ mapper0_ppu_read(u16 addr) {
 u16
 mapper0_ppu_write(u16 addr) { // TODO??
 
-    (void) addr;
-    ABORT("mapper0 cant write to ppu");
-    //if(!address_is_between(addr, 0, MAP0_PPU_DATA_SIZE)) ABORT("invalid address in mapper0");
+    if(!address_is_between(addr, 0, MAP0_PPU_DATA_SIZE)) ABORT("invalid address in mapper0");
 
     return addr;
 }
