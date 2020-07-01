@@ -30,10 +30,12 @@ struct Cartridge {
 
 
 struct Mapper {
+    u16 (*cpu_translate_peak)(u16 /*addr*/);
     u16 (*cpu_translate_read)(u16 /*addr*/);
     u16 (*cpu_translate_write)(u16 /*addr*/);
     u16 (*ppu_translate_read)(u16 /*addr*/);
     u16 (*ppu_translate_write)(u16 /*addr*/);
+    u16 programMemStart;
 } mapper;
 
 #include "mappers.h"
@@ -131,6 +133,22 @@ cartridge_load(const char* name) {
 }
 
 u8
+cartridge_peak(u16 addr) {
+
+    if(!mapper.cpu_translate_read) ABORT("Mapper not set");
+
+    u16 actualAddr = mapper.cpu_translate_read(addr);
+
+    if(actualAddr == 0xFFFF) return 0xFF;
+
+    if(actualAddr >= cartridge.numProgramRoms * PROG_ROM_SINGLE_SIZE) ABORT("mem overflow");
+
+    u8 data = cartridge.programMemory[actualAddr];
+
+    return data;
+}
+
+u8
 cartridge_cpu_read_rom(u16 addr) {
 
     if(!mapper.cpu_translate_read) ABORT("Mapper not set");
@@ -165,7 +183,7 @@ cartridge_cpu_write_rom(u16 addr, u8 val) {
 }
 
 
-u16
+u8
 cartridge_ppu_read_rom(u16 addr) {
 
     u16 actualAddr = mapper.ppu_translate_read(addr);
@@ -174,7 +192,6 @@ cartridge_ppu_read_rom(u16 addr) {
 
     return cartridge.characterMemory[actualAddr];
 }
-
 
 void
 cartridge_ppu_write_rom(u16 addr, u8 val) {

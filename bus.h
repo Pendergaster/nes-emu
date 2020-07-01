@@ -39,6 +39,31 @@ u8 ram[2048];
 u8 buttonState[2];
 u8 internalButtonState[2];
 
+// for debugger, so no state is modified
+static u8
+bus_peak8(u16 addr) {
+
+    u8 ret = 0;
+    if(address_is_between(addr, CPU_MEMORY_START, CPU_MEMORY_SIZE)) {
+        ret = ram[addr & CPU_MEMORY_MIRROR_RANGE];
+    } else if(address_is_between(addr, PPU_MEMORY_START, PPU_MEMORY_SIZE)) {
+        ret = 0x0;
+    } else if (addr == CONTROLLER1) {
+        ret = (buttonState[0] & 0x80) > 0;
+    } else if (addr == CONTROLLER2) {
+        ret = (buttonState[1] & 0x80) > 0;
+    } else {
+        ret = cartridge_peak(addr);
+    }
+
+    CHECKLOG;
+#ifdef LOGFILE
+    fprintf(logfile, "red 0x%04X from address 0x%04X\n", ret, addr);
+#endif
+
+    return ret;
+}
+
 static u8
 bus_read8(u16 addr) {
 

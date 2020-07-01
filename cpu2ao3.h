@@ -221,6 +221,14 @@ Instruction instructionTable[] = {
     INSTRUCTION_TABLE(CREATE_INSTRUCTION_TABLE)
 };
 
+#define CREATE_CPU_TABLE_STING(NAME, ADDR, XXX) \
+#NAME " " #ADDR,
+
+//##ADDR##,
+char* cpuInstructionStrings[] = {
+    INSTRUCTION_TABLE(CREATE_CPU_TABLE_STING)
+};
+
 
 
 #define FETCH do{                                                       \
@@ -265,8 +273,8 @@ cpu_iterrupt_request() { //irq
 
     if(cpu_get_flag(DisableIterups) == 0) {
         // write current pc to stack
-        stack_push( (cpu.pc >> 8) & 0x00FF );
-        stack_push( cpu.pc & 0x00FF );
+        stack_push( (cpu.pc >> 8) & 0xFF );
+        stack_push( cpu.pc & 0xFF );
 
         // https://www.pagetable.com/?p=410
         cpu_set_flag(DisableIterups, 1);
@@ -343,16 +351,14 @@ cpu_clock() {
     if(cpu.cycles == 0) {
         u8 opcode = bus_read8(cpu.pc);
 
+        // TODO remove all logs
         CHECKLOG;
 
-//#ifdef LOGFILE
-        LOG("opcode 0x%04X pc 0x%04X accum 0x%04X, Yreq 0x%04X Xreq 0x%04X opcount %ld",
-                opcode, cpu.pc, cpu.accumReq, cpu.Yreq, cpu.Xreq, cpu.instructionCount);
-//#endif
-        //if(cpu.instructionCount == 10000) {
-        //    fclose(logfile);
-        //    exit(1);
-        //}
+#ifdef LOGFILE
+        LOG("opcode 0x%04X pc 0x%04X accum 0x%04X, Yreq 0x%04X Xreq 0x%04X opcount %ld \n%s",
+                opcode, cpu.pc, cpu.accumReq, cpu.Yreq, cpu.Xreq, cpu.instructionCount,
+                cpuInstructionStrings[opcode]);
+#endif
 
         cpu.pc += 1;
 
@@ -449,12 +455,17 @@ cpu_clock() {
                 {
                     u16 low = (u16)bus_read8(cpu.pc);
                     u16 high = (u16)bus_read8(cpu.pc + 1);
+                    u16 tempAddr = (high << 8) | low;
 
                     if (low == 0x00FF) { // Simulate page boundary hardware bug
-                        high = bus_read8(cpu.pc & 0xFF00); // read pages start to higher byte
+                        high = (tempAddr & 0xFF00);
+                        low = tempAddr;
+                    } else {
+                        high = tempAddr + 1;
+                        low = tempAddr;
                     }
 
-                    addr = bus_read16( (high << 8) | low );
+                    addr = (bus_read8(high) << 8) | bus_read8(low);
                     cpu.pc += 2;
                 } break;
             case INDX: // indirect zero page addressing with x
@@ -498,7 +509,7 @@ cpu_clock() {
                 {
                     FETCH;
                     //LOG("ADC accum 0x%04X, fetched 0x%04X, carry 0x%04X",
-                            //cpu.accumReq, fetched, cpu_get_flag(Carry));
+                    //cpu.accumReq, fetched, cpu_get_flag(Carry));
                     u16 temp = (u16)cpu.accumReq + (u16)fetched + (u16)cpu_get_flag(Carry);
 
                     cpu_set_flag(Carry, temp > 0xFF);
@@ -645,7 +656,6 @@ cpu_clock() {
                     stack_push(cpu.flags | Unused);
 
                     cpu.pc = bus_read16(IRQ_OR_BRK_PC_LOCATION);
-
                 } break;
             case BVC: //branch on overflow clear
                 {
@@ -719,7 +729,6 @@ cpu_clock() {
             case DEC: //decrement, M - 1 -> M or (A - 1 ?? TODO)
                 {
                     FETCH;
-                    //LOG("DEC fetched 0x%04X addr 0x%04X flags 0x%04X", fetched, addr, cpu.flags);
                     u16 temp = fetched - 1;
                     cpu_set_flag(Negative, temp & 0x80);
                     cpu_set_flag(Zero, (temp & 0x00FF) == 0);
