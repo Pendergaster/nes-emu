@@ -28,14 +28,13 @@ struct Cartridge {
     MirrorType  mirrorType;
 } cartridge;
 
-
 struct Mapper {
-    u16 (*cpu_translate_peak)(u16 /*addr*/);
-    u16 (*cpu_translate_read)(u16 /*addr*/);
-    u16 (*cpu_translate_write)(u16 /*addr*/);
-    u16 (*ppu_translate_read)(u16 /*addr*/);
-    u16 (*ppu_translate_write)(u16 /*addr*/);
-    u16 programMemStart;
+    u8      (*cpu_peak_cartridge)(u16 /*addr*/);
+    u8      (*cpu_read_cartridge)(u16 /*addr*/);
+    void    (*cpu_write_cartridge)(u16 /*addr*/, u8 /*val*/);
+    u8      (*ppu_read_cartridge)(u16 /*addr*/);
+    void    (*ppu_write_cartridge)(u16 /*addr*/, u8 /*val*/);
+    u16     programMemStart;
 } mapper;
 
 #include "mappers.h"
@@ -135,9 +134,7 @@ cartridge_load(const char* name) {
 u8
 cartridge_peak(u16 addr) {
 
-    if(!mapper.cpu_translate_read) ABORT("Mapper not set");
-
-    u16 actualAddr = mapper.cpu_translate_read(addr);
+    u16 actualAddr = mapper.cpu_read_cartridge(addr);
 
     if(actualAddr == 0xFFFF) return 0xFF;
 
@@ -148,63 +145,30 @@ cartridge_peak(u16 addr) {
     return data;
 }
 
-u8
+static inline u8
 cartridge_cpu_read_rom(u16 addr) {
 
-    if(!mapper.cpu_translate_read) ABORT("Mapper not set");
-
-    u16 actualAddr = mapper.cpu_translate_read(addr);
-
-    if(actualAddr == 0xFFFF) return 0;
-
-    if(actualAddr >= cartridge.numProgramRoms * PROG_ROM_SINGLE_SIZE) ABORT("mem overflow");
-
-    u8 data = cartridge.programMemory[actualAddr];
-    CHECKLOG;
-
-#ifdef LOGFILE
-    fprintf(logfile, "mapper fetched 0X%04X from addr 0X%04X\n", data, actualAddr);
-#endif
-
-    return data;
+    return mapper.cpu_read_cartridge(addr);
 }
 
 
-void
+static inline void
 cartridge_cpu_write_rom(u16 addr, u8 val) {
 
-    if(!mapper.cpu_translate_write) ABORT("Mapper not set");
-
-    u16 actualAddr = mapper.cpu_translate_write(addr);
-    if(actualAddr == 0xFFFF) return;
-    if(actualAddr >= cartridge.numProgramRoms * PROG_ROM_SINGLE_SIZE) ABORT("mem overflow");
-
-    cartridge.programMemory[actualAddr] = val;
+    mapper.cpu_write_cartridge(addr, val);
 }
 
 
-u8
+static inline u8
 cartridge_ppu_read_rom(u16 addr) {
 
-    u16 actualAddr = mapper.ppu_translate_read(addr);
-
-    if(actualAddr >= cartridge.numCharacterRoms * CHAR_ROM_SINGLE_SIZE) ABORT("mem overflow");
-
-    return cartridge.characterMemory[actualAddr];
+    return mapper.ppu_read_cartridge(addr);
 }
 
 void
 cartridge_ppu_write_rom(u16 addr, u8 val) {
 
-    u16 actualAddr = mapper.ppu_translate_write(addr);
-
-    if(actualAddr >= cartridge.numCharacterRoms * CHAR_ROM_SINGLE_SIZE) ABORT("mem overflow");
-
-    cartridge.characterMemory[actualAddr] = val;
+    mapper.ppu_write_cartridge(addr, val);
 }
-
-
-
-
 
 #endif /* CARTRIDGE_H */

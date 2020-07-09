@@ -16,10 +16,10 @@ const u32 SCREEN_WIDTH = 1800, SCREEN_HEIGHT = 1000;
 #include "fileload.h"
 #include "cartridge.h"
 #include "bus.h"
-#include "cpu2ao3.h"
+#include "cpu.h"
 #include "ppu.h"
 #include "input.h"
-#include "cpudebugger.h"
+#include "debugger.h"
 
 
 int
@@ -77,6 +77,12 @@ main(int argc, char** argv) {
     LOG("All initialized");
 
     u32 updateCounter = 0;
+
+    u32 currentTime;
+    u32 lastTime = currentTime = SDL_GetTicks();
+
+    double targetDelta = 1.0 / 60.0;
+
     while (running) {
 
         running = keystate_update();
@@ -87,7 +93,12 @@ main(int argc, char** argv) {
                 do {
                     ppu_clock();
                     if(updateCounter % 3 == 0) {
-                        cpu_clock();
+                        if(!ppu.oam.DMAactive) {
+                            cpu_clock();
+                        }
+                        else {
+                            ppu_dma_oam(updateCounter);
+                        }
                     }
                     if(ppu.NMIGenerated == 1) {
                         ppu.NMIGenerated = 0;
@@ -105,7 +116,13 @@ main(int argc, char** argv) {
                     do {
                         ppu_clock();
                         if(updateCounter % 3 == 0) {
-                            updated = cpu_clock();
+
+                            if(!ppu.oam.DMAactive) {
+                                updated = cpu_clock();
+                            } else {
+                                ppu_dma_oam(updateCounter);
+                            }
+
                         }
                         if(ppu.NMIGenerated == 1) {
                             ppu.NMIGenerated = 0;
@@ -118,18 +135,30 @@ main(int argc, char** argv) {
                 }
             }
         } else { //normal update
-            do {
-                ppu_clock();
-                if(updateCounter % 3 == 0) {
-                    cpu_clock();
-                }
-                if(ppu.NMIGenerated == 1) {
-                    ppu.NMIGenerated = 0;
-                    cpu_no_mask_iterrupt();
-                }
-                updateCounter += 1;
-            } while(ppu.frameComplete == 0 && debug == 1);
-            ppu.frameComplete = 0;
+
+            currentTime = SDL_GetTicks();
+            double delta = (double)(currentTime - lastTime) / 1000.0;
+
+            if(delta > targetDelta) {
+                lastTime = currentTime;
+
+                do {
+                    ppu_clock();
+                    if(updateCounter % 3 == 0) {
+                        if(!ppu.oam.DMAactive) {
+                            cpu_clock();
+                        } else {
+                            ppu_dma_oam(updateCounter);
+                        }
+                    }
+                    if(ppu.NMIGenerated == 1) {
+                        ppu.NMIGenerated = 0;
+                        cpu_no_mask_iterrupt();
+                    }
+                    updateCounter += 1;
+                } while(ppu.frameComplete == 0 && debug == 1);
+                ppu.frameComplete = 0;
+            }
         }
         debugger_update();
 
@@ -147,5 +176,5 @@ main(int argc, char** argv) {
 
     nk_sdl_shutdown();
     //TODO clean everything up
-    LOG("byeee");
+    LOG("everything shutdown correctly...");
 }

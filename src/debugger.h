@@ -25,6 +25,7 @@
 
 struct nk_image renderImage;
 struct nk_image patternImage[2];
+struct nk_image oamImage;
 
 
 #include "style.c"
@@ -45,7 +46,7 @@ debugger_init(SDL_Window *win) {
     disassemblyTable = calloc(programMemSize, sizeof(char *));
 
     // program memory start
-    for(u16 i = mapper.programMemStart; i < (mapper.programMemStart + programMemSize); i++) {
+    for(u32 i = mapper.programMemStart; i < (mapper.programMemStart + programMemSize); i++) {
 
         u16 index = i - mapper.programMemStart;
         char* disassembly = malloc(32);
@@ -119,6 +120,7 @@ debugger_init(SDL_Window *win) {
     renderImage = nk_image_id(ppu.screen.tex);
     patternImage[0] = nk_image_id(ppu.pattern[0].tex);
     patternImage[1] = nk_image_id(ppu.pattern[1].tex);
+    oamImage = nk_image_id(ppu.OAMvisualisation.tex);
 }
 
 static void
@@ -285,7 +287,7 @@ intruction_debugger() {
     u16 tempPC = wantedAddr - 1;
     for(i32 i = 13; i >= 0; tempPC--) {
 
-        u16 realAddr = mapper.cpu_translate_peak(tempPC);
+        u16 realAddr = 0; //mapper.cpu_translate_peak(tempPC); // TODO fix
         if(realAddr != 0xFFFF) {
             if(disassemblyTable[realAddr]) {
                 instructionCache[i] =
@@ -300,7 +302,7 @@ intruction_debugger() {
     }
 
     tempPC = wantedAddr; // Current location
-    u16 realAddr = mapper.cpu_translate_peak(tempPC);
+    u16 realAddr = 0; //mapper.cpu_translate_peak(tempPC); TODO fix
 
     if(realAddr != 0xFFFF) {
         if(disassemblyTable[realAddr]) {
@@ -319,7 +321,7 @@ intruction_debugger() {
     // down
     tempPC = wantedAddr + 1;
     for(u16 i = 15; i < 29; tempPC++) {
-        u16 realAddr = mapper.cpu_translate_peak(tempPC);
+        u16 realAddr = 0; //mapper.cpu_translate_peak(tempPC); TODO fix
         if(realAddr != 0xFFFF) {
             if(disassemblyTable[realAddr]) {
                 instructionCache[i] =
@@ -497,11 +499,28 @@ pattern_view() {
 
 }
 
+static void
+oam_view() {
+
+    ppu_render_oam();
+    imageview_update(&ppu.OAMvisualisation);
+
+    int w = ppu.OAMvisualisation.h * 2, h = ppu.OAMvisualisation.h * 2;
+    nk_layout_space_begin(ctx, NK_STATIC, h, 2);
+
+    nk_layout_space_push(ctx, nk_rect(0, 0, w, h));
+
+    nk_image(ctx, oamImage);
+
+    nk_layout_space_end(ctx);
+
+}
+
 int step = 0, frameSkip = 0;
 static void
 debugger_update() {
 
-
+#if 0
     u32 windowFlags = 0;
     if (nk_begin(ctx, "General", nk_rect(0, 0, (SCREEN_WIDTH * 0.75), SCREEN_HEIGHT), windowFlags)) {
 
@@ -512,6 +531,11 @@ debugger_update() {
 
         if (nk_tree_push(ctx, NK_TREE_TAB, "Pattern view", NK_MINIMIZED)) {
             pattern_view();
+            nk_tree_pop(ctx);
+        }
+
+        if (nk_tree_push(ctx, NK_TREE_TAB, "OAM view", NK_MINIMIZED)) {
+            oam_view();
             nk_tree_pop(ctx);
         }
 
@@ -547,7 +571,7 @@ debugger_update() {
     }
 
     nk_end(ctx);
-
+#endif
     u32 posX = (u32)(SCREEN_WIDTH * 0.25);
     u32 posX2 = (u32)(SCREEN_WIDTH * 0.50);
     u32 posY = (u32)(SCREEN_HEIGHT * 0.25);

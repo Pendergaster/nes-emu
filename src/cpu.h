@@ -6,6 +6,7 @@
 #define CPU2AO3_H
 
 #include "defs.h"
+#include "cpudata.h"
 #include "bus.h"
 // http://www.6502.org/tutorials/6502opcodes.html#ROR opcode explanations
 
@@ -16,15 +17,6 @@
 
 // Different intructions take differnet amount of clock cycles
 // 56 legal instuctions
-
-#define STACK_START             0x0100
-#define STACK_SIZE              0xFF
-#define PROGRAM_START_POINTER   0xFFFC
-
-// https://www.pagetable.com/?p=410
-#define NMI_PC_LOCATION         0xFFFA
-#define RESET_PC_LOCATION       0xFFFC
-#define IRQ_OR_BRK_PC_LOCATION  0xFFFE
 
 typedef enum CpuStatus {
     Carry           = (1 << 0),
@@ -136,29 +128,6 @@ static inline u8
 check_extra_cycle(Instructions opcode) {
     return extraCycleFlags & (/*(u64)1 << */opcode);
 }
-
-typedef struct cpu2ao3 {
-    // reqisters
-    u8 Xreq;
-    u8 Yreq;
-    u8 accumReq;
-
-    // Processor status
-    u8 flags;
-    // Program counter
-    u16 pc;
-
-    u8 stackPointer;
-    u8 cycles;
-
-    u64 instructionCount;
-} cpu2ao3;
-
-// global cpu variable
-cpu2ao3 cpu = {
-    .Xreq = 0, .Yreq = 0, .accumReq = 0, .flags = 0, .pc = 0x0, // pc is read from program start ptr
-    .stackPointer = STACK_SIZE, .cycles = 0
-};
 
 static inline void
 cpu_set_flag(CpuStatus flag,u8 cond) {
@@ -1016,7 +985,7 @@ cpu_clock() {
                 } break;
             case XXX: // Unknown
                 {
-                    //ABORT("not legal instruction");
+                    ABORT("not legal instruction");
                 } break;
             default:
                 {
@@ -1038,15 +1007,6 @@ cpu_clock() {
 
 
     return ret;
-}
-
-static void
-cpu_load_rom(u8* rom, u8 len, u16 loadAddress) {
-
-    for(int i = 0; i < len; i++) {
-        bus_write8(loadAddress + i, rom[i]);
-    }
-    bus_write16(PROGRAM_START_POINTER, loadAddress);
 }
 
 #endif /*CPU2AO3_H*/

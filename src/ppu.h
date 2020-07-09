@@ -25,7 +25,9 @@ static u8 ppu_read(u16 addr);
 #define PPU_PALETTE_MEMORY_START        0x3F00
 #define PPU_PALETTE_MEMORY_END          0x3FFF
 
-#include "cmath.h"
+#define PPU_DMA_WRITE_ADDRESS           0x4014
+
+#include "cpudata.h"
 
 typedef struct ImageView {
     u8*     data;
@@ -83,12 +85,53 @@ typedef union Loopy {
     u16 reqister;
 } Loopy ;
 
+typedef enum DMAstate {
+    DMANotActive        = 0,
+    DMAWaitingForCopy   = 1,
+    DMACopyingActive    = 2,
+} DMAstate;
+
 STATIC_ASSERT(sizeof(Loopy) == sizeof(u16), loopy_size_wrong);
+
+typedef enum OAMDataAttributes {
+    SpritePaletteLow      = (1 << 0),
+    SpritePaletteHigh     = (1 << 1),
+    SpritePriority        = (1 << 5),
+    SpriteHorizontalFlip  = (1 << 6),
+    SpriteVerticalFlip    = (1 << 7),
+} OAMDataAttributes;
+
+typedef struct OAMData {
+    u8 yPos;
+    u8 tileIndex;
+    u8 attributes;
+    u8 xPos;
+} OAMData;
+
+STATIC_ASSERT(sizeof(OAMData) == sizeof(u32), OAMData_size_wrong);
+
+typedef struct OAM {
+
+    u8          primary[256];                // 64 sprites
+    u8          secondary[32];               // 8 sprites
+    u8          numSpritesFound;
+    u8          xCounters[8];
+    u8          attributeLatches[8];
+
+    u8          addr;
+    u8          DMAactive;
+    u8          DMAaddr; // lets assume that reading starts at XX00 address always //TODO ??
+
+    //          indicates if 0x00 sprite is in secondaryOAM
+    u8          spriteZeroRendered;
+} OAM;
 
 struct PPU {
     u8          nameTables[2 * NAMETABLE_SIZE]; // layout of background 0x2000 - 0x3F00
-    u8          patternTables[2][4096];         // sprites 0x0 - 0x1FFF
+    //u8          patternTables[2][4096];         // sprites 0x0 - 0x1FFF
     u8          palette[32];                    // color palette 0x3F00 - 0x3FFF
+
+    OAM         oam;
 
     // Viewable variables
     //u8      paletteView[0x40];
@@ -107,7 +150,6 @@ struct PPU {
 
     u8          dataAddrAccess;
     u8          internalDataBuffer;
-    //u16         dataAddr; // PPUADDR / PPUDATA
 
     Loopy       loopyT; // Write reqister
     Loopy       loopyV;
@@ -124,14 +166,18 @@ struct PPU {
 
     u16         shifterLow;
     u16         shifterHigh;
-    u16         paletteShifterHigh; // TODO rework
-    u16         paletteShifterLow;  // TODO rework
+    u16         paletteShifterHigh;
+    u16         paletteShifterLow;
+
+    u8          spriteLowShifter[8];
+    u8          spriteHighShifter[8];
 
     u8          NMIGenerated; // TODO sould generate one in cpu write?
     // http://wiki.nesdev.com/w/index.php/PPU_registers#PPUCTRL
 
     ImageView   screen;
     ImageView   pattern[2];
+    ImageView   OAMvisualisation;
 
     GLuint      renderProgram;
     GLint       transformLoc;
@@ -140,22 +186,26 @@ struct PPU {
 } ppu;
 
 typedef struct Color {
-    u8 r,g,b;
+    u8 r,g,b,a; // A is unused here (used only for aligning)
 } Color;
 
-Color colors[0x40] = {
-    {84, 84, 84}, {0, 30, 116}, {8, 16, 144}, {48, 0, 136}, {68, 0, 100}, {92, 0, 48}, {84, 4, 0},
-    {60, 24, 0}, {32, 42, 0}, {8, 58, 0}, {0, 64, 0}, {0, 60, 0}, {0, 50, 60}, {0, 0, 0}, {0, 0, 0},
-    {0, 0, 0}, {152, 150, 152}, {8, 76, 196}, {48, 50, 236}, {92, 30, 228}, {136, 20, 176},
-    {160, 20, 100}, {152, 34, 32}, {120, 60, 0}, {84, 90, 0}, {40, 114, 0}, {8, 124, 0}, {0, 118, 40},
-    {0, 102, 120}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {236, 238, 236}, {76, 154, 236}, {120, 124, 236},
-    {176, 98, 236}, {228, 84, 236}, {236, 88, 180}, {236, 106, 100}, {212, 136, 32}, {160, 170, 0},
-    {116, 196, 0}, {76, 208, 32}, {56, 204, 108}, {56, 180, 204}, {60, 60, 60}, {0, 0, 0}, {0, 0, 0},
-    {236, 238, 236}, {168, 204, 236}, {188, 188, 236}, {212, 178, 236}, {236, 174, 236},
-    {236, 174, 212}, {236, 180, 176}, 228, 196, 144, {204, 210, 120}, {180, 222, 120},
-    {168, 226, 144}, {152, 226, 180}, {160, 214, 228}, {160, 162, 160}, {0, 0, 0}, {0, 0, 0}
-};
+STATIC_ASSERT(sizeof(Color) == sizeof(u32), color_size_wrong);
 
+Color colors[0x40] = {
+    {84, 84, 84, 1}, {0, 30, 116, 1}, {8, 16, 144, 1}, {48, 0, 136, 1}, {68, 0, 100, 1},
+    {92, 0, 48, 1}, {84, 4, 0, 1}, {60, 24, 0, 1}, {32, 42, 0, 1}, {8, 58, 0, 1}, {0, 64, 0, 1},
+    {0, 60, 0, 1}, {0, 50, 60, 1}, {0, 0, 0, 1}, {0, 0, 0, 1}, {0, 0, 0, 1}, {152, 150, 152, 1},
+    {8, 76, 196, 1}, {48, 50, 236, 1}, {92, 30, 228, 1}, {136, 20, 176, 1}, {160, 20, 100, 1},
+    {152, 34, 32, 1}, {120, 60, 0, 1}, {84, 90, 0, 1}, {40, 114, 0, 1}, {8, 124, 0, 1},
+    {0, 118, 40, 1}, {0, 102, 120, 1}, {0, 0, 0, 1}, {0, 0, 0, 1}, {0, 0, 0, 1}, {236, 238, 236, 1},
+    {76, 154, 236, 1}, {120, 124, 236, 1}, {176, 98, 236, 1}, {228, 84, 236, 1}, {236, 88, 180, 1},
+    {236, 106, 100, 1}, {212, 136, 32, 1}, {160, 170, 0, 1}, {116, 196, 0, 1}, {76, 208, 32, 1},
+    {56, 204, 108, 1}, {56, 180, 204, 1}, {60, 60, 60, 1}, {0, 0, 0, 1}, {0, 0, 0, 1},
+    {236, 238, 236, 1}, {168, 204, 236, 1}, {188, 188, 236, 1}, {212, 178, 236, 1},
+    {236, 174, 236, 1}, {236, 174, 212, 1}, {236, 180, 176, 1}, {228, 196, 144, 1},
+    {204, 210, 120, 1}, {180, 222, 120, 1}, {168, 226, 144, 1}, {152, 226, 180, 1},
+    {160, 214, 228, 1}, {160, 162, 160, 1}, {0, 0, 0, 1}, {0, 0, 0, 1}
+};
 
 static u8
 ppu_read(u16 addr) {
@@ -163,17 +213,16 @@ ppu_read(u16 addr) {
     u8 data = 0x00;
     addr &= PPU_MAX_MEMORY_ADDR;
 
-#ifdef LOGFILE
-    u16 realAddr = addr;
-#endif
     if(address_is_between(addr,
                 PPU_PATTERN_MEMORY_START, PPU_PATTERN_MEMORY_END)) {
 
+#if 0
         i8 table = (addr & 0x1000) >> 12;
         i8 tableIndex = addr & 0x0FFF;
 
         data = ppu.patternTables[table][tableIndex];
         // TODO fix or sth
+#endif
         data = cartridge_ppu_read_rom(addr);
 
     } else if (address_is_between(addr,
@@ -188,15 +237,11 @@ ppu_read(u16 addr) {
                     addr &= 0x0FFF;
                     u16 readAddr = addr % NAMETABLE_SIZE;
 
-#ifdef LOGFILE
-                    fprintf(logfile, "VERTICAL 0x%04X\n", addr);
-#endif
-
                     if(addr < NAMETABLE_SIZE) {
                         data = ppu.nameTables[readAddr];
                     } else if(addr < NAMETABLE_SIZE * 2) {
                         data = ppu.nameTables[NAMETABLE_SIZE + readAddr];
-                    }else if(addr < NAMETABLE_SIZE * 3) {
+                    } else if(addr < NAMETABLE_SIZE * 3) {
                         data = ppu.nameTables[readAddr];
                     } else {
                         data = ppu.nameTables[NAMETABLE_SIZE + readAddr];
@@ -207,21 +252,12 @@ ppu_read(u16 addr) {
                     //[0][0]
                     //[1][1]
                     addr &= 0x0FFF;
-#ifdef LOGFILE
-    fprintf(logfile, "HORIZONTAL 0x%04X\n", addr);
-#endif
                     u16 readAddr = addr % NAMETABLE_SIZE;
                     if(addr < NAMETABLE_SIZE * 2) {
                         data =  ppu.nameTables[readAddr];
 
-#ifdef LOGFILE
-                        fprintf(logfile, "read addr 0x%04X\n", readAddr);
-#endif
                     } else {
                         data =  ppu.nameTables[NAMETABLE_SIZE + readAddr];
-#ifdef LOGFILE
-                        fprintf(logfile, "read addr 0x%04X\n", NAMETABLE_SIZE + readAddr);
-#endif
                     }
                 } break;
             default:
@@ -244,10 +280,6 @@ ppu_read(u16 addr) {
         data = cartridge_ppu_read_rom(addr);
     }
 
-#ifdef LOGFILE
-    fprintf(logfile, "ppu red 0x%04X from 0x%04X\n", data, realAddr);
-#endif
-
     return data;
 }
 
@@ -258,18 +290,16 @@ ppu_write(u16 addr, u8 data) {
 
     if(address_is_between(addr,
                 PPU_PATTERN_MEMORY_START, PPU_PATTERN_MEMORY_END)) {
-
-
+#if 0
         i8 table = (addr & 0x1000) >> 12;
         i8 tableIndex = addr & 0x0FFF;
 
-        ppu.patternTables[table][tableIndex] = data;
-
-        //cartridge_ppu_write_rom(addr, data);
+        //ppu.patternTables[table][tableIndex] = data;
+#endif
+        cartridge_ppu_write_rom(addr, data);
 
     } else if (address_is_between(addr,
                 PPU_NAMETABLE_MEMORY_START, PPU_NAMETABLE_MEMORY_END)) {
-
 
         switch(cartridge.mirrorType){
             case VERTICAL:
@@ -284,7 +314,7 @@ ppu_write(u16 addr, u8 data) {
                         ppu.nameTables[readAddr] = data ;
                     } else if(addr < NAMETABLE_SIZE * 2) {
                         ppu.nameTables[NAMETABLE_SIZE + readAddr] = data;
-                    }else if(addr < NAMETABLE_SIZE * 3) {
+                    } else if(addr < NAMETABLE_SIZE * 3) {
                         ppu.nameTables[readAddr] = data;
                     } else {
                         ppu.nameTables[NAMETABLE_SIZE + readAddr] = data;
@@ -311,10 +341,6 @@ ppu_write(u16 addr, u8 data) {
 
     } else if (address_is_between(addr,
                 PPU_PALETTE_MEMORY_START, PPU_PALETTE_MEMORY_END)) {
-
-#ifdef LOGFILE
-        fprintf(logfile, "palette write 0x%04X from 0x%04X\n", data, addr);
-#endif
 
         addr &= 0x001F;
         if (addr == 0x0010) addr = 0x0000;
@@ -348,19 +374,161 @@ ppu_palette_get_color(u8 pixel, u32 paletteIndex) {
     return colors[data & 0x3F];
 }
 
+static void
+ppu_dma_oam(u32 systemClock) {
+
+    switch (ppu.oam.DMAactive) {
+        case DMAWaitingForCopy:
+            {
+                if(systemClock % 2 == 1) { // Start copying on odd system clock
+                    ppu.oam.DMAactive = DMACopyingActive;
+                }
+            } break;
+        case DMACopyingActive:
+            {
+                // Copy the hole thing at once
+                for(u32 i = 0; i <= 0xFF; i++) {
+                    ppu.oam.primary[i] = bus_read8((ppu.oam.DMAaddr << 8) | i);
+                }
+                ppu.oam.DMAactive = DMANotActive;
+                cpu.cycles += 0xFF * 2;
+            } break;
+    }
+}
+
+static void
+ppu_oam_fetch_sprites() {
+
+    memset(ppu.oam.secondary, 0xFF, sizeof(ppu.oam.secondary));
+
+    // try to fetch 8 sprites
+    u32 numFetched = 0;
+    OAMData* evalSprites = (OAMData*)ppu.oam.primary;
+    OAMData* fillArray = (OAMData*)ppu.oam.secondary;
+
+    ppu.oam.spriteZeroRendered = 0;
+
+    for(u32 i = 0; i < 64; i++) {
+
+        OAMData sprite = evalSprites[i];
+        i32 diff = (i32)ppu.scanline - (i32)sprite.yPos;
+        i32 size = ppu.controllerReq & SpriteSize ? 16 : 8;
+
+        if(diff < size && diff >= 0) {
+            if(numFetched == 8) {
+                ppu.statusReq |= SpriteOverflow;
+                break;
+            } else {
+                // Add to secondary OAM
+                fillArray[numFetched] = sprite;
+                ppu.oam.xCounters[numFetched] = sprite.xPos;
+
+                ppu.oam.attributeLatches[numFetched] = sprite.attributes;
+
+                if(i == 0) {
+                    ppu.oam.spriteZeroRendered = 1;
+                }
+            }
+            numFetched += 1;
+        }
+    }
+    ppu.oam.numSpritesFound = numFetched;
+}
+
+static void
+ppu_load_sprite_shifters() {
+    // populate sprite shifters
+    OAMData* sprites = (OAMData*)ppu.oam.secondary;
+    for(u32 i = 0; i < ppu.oam.numSpritesFound; i++) {
+
+        u16 spriteAddr = 0;
+        if(ppu.controllerReq & SpriteSize) { // 8x16
+
+            // For 8x16 sprites, the PPU ignores the pattern table selection
+            // and selects a pattern table from bit 0 of this number.
+            u16 addressOffset = sprites[i].tileIndex & 0x1 ?  0x1000 : 0;
+            // filter first bit, it is the patterntable choice
+            spriteAddr = (sprites[i].tileIndex & 0xFE) * 16 + addressOffset;
+            u16 rowOffset = ppu.scanline - (sprites[i].yPos & 0x7);
+
+            if(sprites[i].attributes & SpriteVerticalFlip) { // Flipped vertically
+                // TODO clean
+                spriteAddr += 7 - rowOffset;
+
+                if(ppu.scanline - sprites[i].yPos < 8) {
+                    // read top half
+                    // TODO clean
+                } else {
+                    // read bottom half
+                    // next tile
+                    spriteAddr += 16;
+                }
+            } else { // Not flipped vertically
+                spriteAddr += rowOffset;
+
+                if(ppu.scanline - sprites[i].yPos < 8) {
+                    // read top half
+                    // TODO clean
+                } else {
+                    // read bottom half
+                    // next tile
+                    spriteAddr += 16;
+                }
+            }
+
+        } else { // 8x8
+
+            u16 addressOffset = ppu.controllerReq & SpritePatterntableAddress ?  0x1000 : 0;
+            spriteAddr = sprites[i].tileIndex * 16 + addressOffset;
+
+            i32 rowOffset = (i32)ppu.scanline - (i32)sprites[i].yPos;
+
+            //if(sprites[i].tileIndex == 0xDD) {
+            //    LOG("x sprites[i].x %d %d", (int)sprites[i].xPos, (int)ppu.oam.xCounters[i]);
+            //}
+
+            if(sprites[i].attributes & SpriteVerticalFlip) {
+                // Flipped vertically
+                spriteAddr += 7 - rowOffset;
+            } else {
+                // Not flipped vertically
+                spriteAddr += rowOffset;
+            }
+        }
+
+        u8 lowerPatternByte = ppu_read(spriteAddr);
+        u8 higherPatternByte = ppu_read(spriteAddr + 8);
+
+        // Do horizontal flipping
+        if(sprites[i].attributes & SpriteHorizontalFlip) {
+
+            static unsigned char lookup[16] = {
+                0x0, 0x8, 0x4, 0xc, 0x2, 0xa, 0x6, 0xe,
+                0x1, 0x9, 0x5, 0xd, 0x3, 0xb, 0x7, 0xf
+            };
+
+            // Reverse the top and bottom nibble then swap them.
+            lowerPatternByte = (lookup[lowerPatternByte&0b1111] << 4) | lookup[lowerPatternByte>>4];
+            higherPatternByte = (lookup[higherPatternByte&0b1111] << 4) | lookup[higherPatternByte>>4];
+        }
+
+        ppu.spriteLowShifter[i] = lowerPatternByte;
+        ppu.spriteHighShifter[i] = higherPatternByte;
+    }
+}
+
+static inline void
+increment_coarseX() {
+    if(ppu.loopyV.coarseX == 31) { // wrap around to next table
+        ppu.loopyV.coarseX = 0;
+        ppu.loopyV.nametableSelect ^= 0x1; //change nametable X
+    } else {
+        ppu.loopyV.coarseX += 1;
+    }
+}
 
 static void
 ppu_clock() {
-
-    CHECKLOG;
-
-#ifdef LOGFILE
-    fprintf(logfile, "scanline %d cycle %d status %d mask %d control %d loopyT %d looyV %d\n",
-            ppu.scanline, ppu.cycle, ppu.statusReq, ppu.maskReq, ppu.controllerReq, ppu.loopyT.reqister,
-            ppu.loopyV.reqister);
-#endif
-
-#if 1
 
     // TODO reorder
     if(ppu.scanline >= -1 && ppu.scanline < 240) { // out of vertical blank
@@ -372,7 +540,7 @@ ppu_clock() {
         }
 
         if(ppu.scanline == -1 && ppu.cycle == 1) {
-            ppu.statusReq &= ~VerticalBlankStarted;
+            ppu.statusReq = 0;
         }
         /*between visible range or load next frames first */
         if((ppu.cycle >= 2 && ppu.cycle < 258) || (ppu.cycle >= 321 && ppu.cycle < 338)) {
@@ -430,12 +598,7 @@ ppu_clock() {
                 case 7: // inc hori V
                     {
                         if(ppu.maskReq & (ShowBackground | ShowSprites)) { //TODO check place
-                            if(ppu.loopyV.coarseX == 31) { // wrap around to next table
-                                ppu.loopyV.coarseX = 0;
-                                ppu.loopyV.nametableSelect ^= 0x1; //change nametable X
-                            } else {
-                                ppu.loopyV.coarseX += 1;
-                            }
+                            increment_coarseX();
                         }
                     } break;
             }
@@ -466,6 +629,9 @@ ppu_clock() {
         }
 
         if(ppu.cycle == 257) { // hori (v) = hori (t)
+            // Fetch next scanline sprites TODO
+            ppu_oam_fetch_sprites();
+
             // load shifters
             load_shifters();
             // reset X
@@ -473,6 +639,10 @@ ppu_clock() {
                 ppu.loopyV.nametableSelect = (ppu.loopyV.nametableSelect & 0x2) | (ppu.loopyT.nametableSelect & 0x1); // set nametable X
                 ppu.loopyV.coarseX = ppu.loopyT.coarseX;
             }
+        }
+
+        if(ppu.cycle == 340) {
+            ppu_load_sprite_shifters();
         }
 
         // TODO remove and test
@@ -502,12 +672,9 @@ ppu_clock() {
     if((ppu.cycle - 1) >= 0 && (ppu.cycle - 1) < ((TEX_WIDTH)) &&
             ppu.scanline >= 0 && ppu.scanline < (TEX_HEIGHT)) {
 
-#ifdef LOGFILE
-        fprintf(logfile, "rendering\n");
-#endif
         // render / put pixel
-        u8 pixel = 0;
-        u8 palette = 0;
+        u8 bgPixel = 0, bgPalette = 0;
+
         if(ppu.maskReq & ShowBackground) {
 
             u16 mux = 0x8000 >> ppu.fineX;
@@ -515,39 +682,99 @@ ppu_clock() {
             uint8_t bit1 = (ppu.shifterLow & mux) > 0;
             uint8_t bit2 = (ppu.shifterHigh & mux) > 0;
 
-            pixel = (bit2 << 1) | bit1;
+            bgPixel = (bit2 << 1) | bit1;
 
             bit1 = (ppu.paletteShifterLow & mux) > 0;
             bit2 = (ppu.paletteShifterHigh & mux) > 0;
 
-            palette = (bit2 << 1) | bit1;
+            bgPalette = (bit2 << 1) | bit1;
+        }
 
-#ifdef LOGFILE
-            fprintf(logfile, "pixel palette 0x%04X 0x%04X\n", pixel, palette);
+        u8 fgPixel = 0, fgPalette = 0, fgPriority = 0;
+#if 1
+        u8 zeroIndexRendered = 0;
+
+        if(ppu.maskReq & ShowSprites) {
+
+            for(u8 i = 0; i < ppu.oam.numSpritesFound; i++) {
+
+                i32 diff = (i32)(ppu.cycle - 1) - (i32)ppu.oam.xCounters[i]; // TODO migh be wrong
+
+                if(diff >= 0 && diff < 8) {
+
+                    u8 fgPixelLow = (ppu.spriteLowShifter[i] & 0x80) > 0;
+                    u8 fgPixelHigh = (ppu.spriteHighShifter[i] & 0x80) > 0;
+
+                    fgPixel = (fgPixelHigh << 1) | fgPixelLow;
+
+                    fgPalette = (ppu.oam.attributeLatches[i] &
+                            (SpritePaletteLow | SpritePaletteHigh)) + 4;
+
+                    fgPriority = (ppu.oam.attributeLatches[i] & SpritePriority) == 0;
+
+                    ppu.spriteLowShifter[i] <<= 1;
+                    ppu.spriteHighShifter[i] <<= 1;
+
+                    // Render the pixel
+                    if(fgPixel != 0) {
+                        zeroIndexRendered = i == 0;
+                        break;
+                    }
+
+                }
+            }
+        }
 #endif
+
+        u8 finalPixel = 0, finalPalette = 0;
+
+        // determine if you render background or sprite
+        if(bgPixel == 0 && fgPixel == 0) {
+            // Do nothing
+        } else if (bgPixel == 0 && fgPixel != 0) {
+            // Draw foregroung
+            finalPixel = fgPixel;
+            finalPalette = fgPalette;
+        } else if (bgPixel != 0 && fgPixel == 0) {
+            // Draw background
+            finalPixel = bgPixel;
+            finalPalette = bgPalette;
+        } else {
+
+            if(fgPriority) {
+                finalPixel = fgPixel;
+                finalPalette = fgPalette;
+            } else {
+
+                finalPixel = bgPixel;
+                finalPalette = bgPalette;
+            }
+
+            if(zeroIndexRendered && ppu.oam.spriteZeroRendered && (ppu.maskReq & ShowBackground)) {
+                // Sprite zero hit
+                u8 xPos = 0;
+                // http://wiki.nesdev.com/w/index.php/PPU_OAM#Sprite_zero_hits
+                if(ppu.maskReq & SpriteIn8MostLeft || ppu.maskReq & BackgroungIn8MostLeft) {
+                    xPos = 8;
+                }
+
+                if(ppu.cycle > xPos && ppu.cycle < 258 && ppu.cycle != 255) {
+                    ppu.statusReq |= Sprite0Hit;
+                }
+            }
         }
 
 
-        //LOG("y %d x %d", ppu.scanline, ppu.cycle - 1);
 
-#ifdef LOGFILE
-        fprintf(logfile, "rendering to %d %d %d\n",
-                ppu.scanline, ppu.cycle, (ppu.scanline * TEX_WIDTH + (ppu.cycle - 1)));
-#endif
-
-        Color color = ppu_palette_get_color(pixel, palette);
-        memcpy(ppu.screen.data + (ppu.scanline * TEX_WIDTH + (ppu.cycle - 1)) * 3,
-                &color, sizeof(u8) * 3);
-
-#ifdef LOGFILE
-        fprintf(logfile, "rendering done\n");
-#endif
+        Color color = ppu_palette_get_color(finalPixel, finalPalette);
+        memcpy(ppu.screen.data +
+                (ppu.scanline * TEX_WIDTH + (ppu.cycle - 1)) * sizeof(Color),
+                &color, sizeof(Color));
     }
 
     // update cycle
     ppu.cycle++;
 
-    static u64 temp = 0;
     if (ppu.cycle >= 341)
     {
         ppu.cycle = 0;
@@ -558,35 +785,19 @@ ppu_clock() {
             ppu.frameComplete = 1;
         }
     }
-    temp++;
-
-#else
-    ppu.cycle++;
-
-    u8 color[3] = {rand() & 0xFF, rand() & 0xFF, rand() & 0xFF};
-
-    int x = rand() % (TEX_WIDTH);
-    int y = rand() % (TEX_HEIGHT);
-
-    memcpy(&ppu.screen.data[(y * TEX_WIDTH + x) * 3] ,color, sizeof(u8) * 3);
-
-    if(ppu.cycle > TEX_WIDTH) { // reset
-        ppu.cycle = 0;
-        ppu.scanline += 1;
-
-        if(ppu.scanline > TEX_HEIGHT) { // reset
-            ppu.scanline = -1;
-            ppu.frameComplete = 1;
-        }
-    }
-#endif
 }
 
 static void
 ppu_cpu_write(u16 addr, u8 data) {
 
-    ASSERT_MESSAGE( (addr >= 0x2000 && addr <= 0x2007) || addr == 0x4014,
+    ASSERT_MESSAGE( (addr >= 0x2000 && addr <= 0x2007) || addr == PPU_DMA_WRITE_ADDRESS,
             "Incorrect ppu write 0x%04X", addr);
+
+    // https://wiki.nesdev.com/w/index.php/PPU_registers#OAMDMA
+    if(addr == PPU_DMA_WRITE_ADDRESS) {
+        ppu.oam.DMAactive = DMAWaitingForCopy;
+        ppu.oam.DMAaddr = data;
+    }
 
     addr &= 0x7;
 
@@ -607,19 +818,17 @@ ppu_cpu_write(u16 addr, u8 data) {
             } break;
         case 0x3: //OAMADDR
             {
-
+                ppu.oam.addr = data;
             } break;
         case 0x4: //OAMDATA
             {
-
+                ppu.oam.primary[ppu.oam.addr] = data;
+                // https://wiki.nesdev.com/w/index.php/PPU_registers#OAMDATA
+                ppu.oam.addr += 1; // TODO check increment
             } break;
         case 0x5: //PPUSCROLL
             {
                 if(ppu.dataAddrAccess == 0) {
-
-#ifdef LOGFILE
-                    fprintf(logfile, "latch 1 \n");
-#endif
                     //2005 first write:
                     //t:0000000000011111=d:11111000
                     //x=d:00000111
@@ -627,9 +836,6 @@ ppu_cpu_write(u16 addr, u8 data) {
                     ppu.fineX = data & 0x07; //(8 sprite lenght) TODO assert ?
                     ppu.loopyT.coarseX = data >> 3;
                 } else {
-#ifdef LOGFILE
-                    fprintf(logfile, "latch 0 \n");
-#endif
                     //2005 second write:
                     //t:0000001111100000=d:11111000
                     //t:0111000000000000=d:00000111
@@ -660,10 +866,6 @@ ppu_cpu_write(u16 addr, u8 data) {
                 ABORT("unknown ppu write");
             } break;
     }
-
-#ifdef LOGFILE
-        fprintf(logfile, "wrote 0x%04X to 0x%04X\n", data, addr);
-#endif
 }
 
 static u8
@@ -677,38 +879,41 @@ ppu_cpu_read(u16 addr) {
                 ppu.statusReq &= ~VerticalBlankStarted;
                 //ppu.dataAddr = 0; //TODO
             } break;
+        case 0x4: {
+                      ret = ppu.oam.primary[ppu.oam.addr];
+                  } break;
         case 0x7: //PPUDATA
-            {
-                if(address_is_between(ppu.loopyV.reqister,
-                            PPU_PALETTE_MEMORY_START, PPU_PALETTE_MEMORY_END)) {
-                    // The palette data is placed immediately on the data bus,
-                    // and hence no dummy read is required.
-                    // Reading the palettes still updates the internal buffer though,
-                    // but the data placed in it is the mirrored nametable data that would appear
-                    // "underneath" the palette.
+                  {
+                      if(address_is_between(ppu.loopyV.reqister,
+                                  PPU_PALETTE_MEMORY_START, PPU_PALETTE_MEMORY_END)) {
+                          // The palette data is placed immediately on the data bus,
+                          // and hence no dummy read is required.
+                          // Reading the palettes still updates the internal buffer though,
+                          // but the data placed in it is the mirrored nametable data that would appear
+                          // "underneath" the palette.
 
-                    ret = ppu.internalDataBuffer = ppu_read(ppu.loopyV.reqister);
-                } else {
-                    // When reading while the VRAM address is in the range 0-$3EFF
-                    // (i.e., before the palettes),
-                    // the read will return the contents of an internal read buffer.
-                    //
-                    // After the CPU reads and gets the contents of the internal buffer,
-                    // the PPU will immediately update the internal buffer with the byte at the
-                    // current VRAM address.
-                    // Thus, after setting the VRAM address,
-                    // one should first read this register and discard the result.
-                    ret = ppu.internalDataBuffer;
-                    ppu.internalDataBuffer = ppu_read(ppu.loopyV.reqister);
-                }
+                          ret = ppu.internalDataBuffer = ppu_read(ppu.loopyV.reqister);
+                      } else {
+                          // When reading while the VRAM address is in the range 0-$3EFF
+                          // (i.e., before the palettes),
+                          // the read will return the contents of an internal read buffer.
+                          //
+                          // After the CPU reads and gets the contents of the internal buffer,
+                          // the PPU will immediately update the internal buffer with the byte at the
+                          // current VRAM address.
+                          // Thus, after setting the VRAM address,
+                          // one should first read this register and discard the result.
+                          ret = ppu.internalDataBuffer;
+                          ppu.internalDataBuffer = ppu_read(ppu.loopyV.reqister);
+                      }
 
-                ppu.loopyV.reqister += ppu.controllerReq & VramAddressIncrement ? 32 : 1;
+                      ppu.loopyV.reqister += ppu.controllerReq & VramAddressIncrement ? 32 : 1;
 
-            } break;
+                  } break;
         default:
-            {
-                //ABORT("error ppu read! 0x%04X", addr);
-            }
+                  {
+                      //ABORT("error ppu read! 0x%04X", addr);
+                  }
     }
     return ret;
 }
@@ -736,7 +941,7 @@ ppu_render_patterntable(u8 index, u32 paletteIndex) { // there is 2 pattern tabl
 
                     u16 imageX = (tileX * TILE_DIM + (7 - pixelX));
 
-                    u8 pixel = (lsb & 0x1) + (msb & 0x1);
+                    u8 pixel = ((msb & 0x1) << 1) | (lsb & 0x1);
 
                     lsb >>= 1;
                     msb >>= 1;
@@ -745,8 +950,63 @@ ppu_render_patterntable(u8 index, u32 paletteIndex) { // there is 2 pattern tabl
                     Color color = ppu_palette_get_color(pixel, paletteIndex);
 
                     // Draw the pixel
-                    memcpy(ppu.pattern[index].data + (imageY * ppu.pattern[index].w + imageX) *
-                            (sizeof(u8) * 3), &color, (sizeof(u8) * 3));
+                    memcpy(ppu.pattern[index].data +
+                            (imageY * ppu.pattern[index].w + imageX) * sizeof(Color),
+                            &color,
+                            sizeof(Color));
+                }
+            }
+        }
+    }
+#endif
+}
+
+static void
+ppu_render_oam() { // there is 2 pattern tables so this is 0 or 1
+#if 1
+
+    memset(ppu.OAMvisualisation.data, 0,
+            ppu.OAMvisualisation.w * ppu.OAMvisualisation.h * sizeof(Color));
+
+    OAMData* data = (OAMData*)ppu.oam.primary; // TODO fix pointer cast
+    for(u16 tileY = 0; tileY < 8; tileY++) { // FOR TILE Y
+
+        for(u16 tileX = 0; tileX <= 8; tileX++) { // FOR TILE X
+
+            if(data[(tileY * 8) + tileX].yPos == 0xFF) {
+                continue;
+            }
+
+            u8 palette = (data[(tileY * 8) + tileX].attributes &
+                    (SpritePaletteLow | SpritePaletteHigh)) + 4;
+
+            u16 tileoffset = data[(tileY * 8) + tileX].tileIndex * 16;
+
+            for(u16 pixelY = 0; pixelY < TILE_DIM; pixelY++) { // FOR PIXEL Y
+
+                u8 lsb = ppu_read(tileoffset + pixelY);
+                u8 msb = ppu_read(tileoffset + 8 + pixelY);
+
+                u16 imageY = tileY * TILE_DIM + pixelY;
+
+                for(u16 pixelX = 0; pixelX < TILE_DIM; pixelX++) {  // FOR PIXEL X
+
+                    u16 imageX = (tileX * TILE_DIM + (7 - pixelX));
+
+                    u8 pixel = ((msb & 0x1) << 1) | (lsb & 0x1);
+
+                    lsb >>= 1;
+                    msb >>= 1;
+
+                    // Set pixel in texture
+                    Color color = ppu_palette_get_color(pixel, palette);
+#if 1
+                    // Draw the pixel
+                    memcpy(ppu.OAMvisualisation.data +
+                            (imageY * ppu.OAMvisualisation.w + imageX) * sizeof(Color),
+                            &color,
+                            sizeof(Color));
+#endif
                 }
             }
         }
@@ -757,11 +1017,11 @@ ppu_render_patterntable(u8 index, u32 paletteIndex) { // there is 2 pattern tabl
 static ImageView
 imageview_create(u32 w, u32 h) {
 
-    ImageView ret = { .w = w, .h = h, .data = calloc(w * h, sizeof(u8) * 3)};
+    ImageView ret = { .w = w, .h = h, .data = calloc(w * h, sizeof(Color))};
     GLCHECK(glGenTextures(1, &ret.tex));
     GLCHECK(glBindTexture(GL_TEXTURE_2D, ret.tex));
 
-    GLCHECK(glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, w, h, 0, GL_RGB,
+    GLCHECK(glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, w, h, 0, GL_RGBA,
                 GL_UNSIGNED_BYTE, ret.data));
 
     GLCHECK(glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST));
@@ -777,7 +1037,7 @@ imageview_update(ImageView* view) {
 
     GLCHECK(glBindTexture(GL_TEXTURE_2D, view->tex));
     GLCHECK(glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, view->w, view->h,
-                GL_RGB, GL_UNSIGNED_BYTE, view->data));
+                GL_RGBA, GL_UNSIGNED_BYTE, view->data));
     GLCHECK(glBindTexture( GL_TEXTURE_2D, 0));
 }
 
@@ -881,6 +1141,7 @@ ppu_init() {
     ppu.screen = imageview_create(TEX_WIDTH, TEX_HEIGHT);
     ppu.pattern[0] = imageview_create(TILE_DIM * NUM_TILES, TILE_DIM * NUM_TILES);
     ppu.pattern[1] = imageview_create(TILE_DIM * NUM_TILES, TILE_DIM * NUM_TILES);
+    ppu.OAMvisualisation = imageview_create(8 * TILE_DIM , 8 * TILE_DIM);
 
 
     // generte vertex data

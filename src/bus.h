@@ -15,6 +15,8 @@ static void bus_write16(u16 addr, u16 data);
 #include "defs.h"
 #include "ppu.h"
 
+#include <semaphore.h>
+
 // cpu does not have internal memory so it is connected to memory via bus
 // 0x0 - 0xFFFF  adress range
 // this allows to connect different devices to talk with the cpu and map them to this address range
@@ -27,10 +29,13 @@ static void bus_write16(u16 addr, u16 data);
 #define CPU_MEMORY_MIRROR_RANGE     0x07FF
 
 #define PPU_MEMORY_START            0x2000
-#define PPU_MEMORY_SIZE             0x3FFF
+#define PPU_MEMORY_END              0x3FFF
 
 #define CONTROLLER1                 0x4016
 #define CONTROLLER2                 0x4017
+
+#define CARTRIDGE_MEMORY_START      0x4020
+#define CARTRIDGE_MEMORY_END        0xFFFF
 
 // 0x4020 - 0xFFFF cartridge range
 
@@ -46,20 +51,17 @@ bus_peak8(u16 addr) {
     u8 ret = 0;
     if(address_is_between(addr, CPU_MEMORY_START, CPU_MEMORY_SIZE)) {
         ret = ram[addr & CPU_MEMORY_MIRROR_RANGE];
-    } else if(address_is_between(addr, PPU_MEMORY_START, PPU_MEMORY_SIZE)) {
+    } else if(address_is_between(addr, PPU_MEMORY_START, PPU_MEMORY_END)) {
         ret = 0x0;
     } else if (addr == CONTROLLER1) {
         ret = (buttonState[0] & 0x80) > 0;
     } else if (addr == CONTROLLER2) {
         ret = (buttonState[1] & 0x80) > 0;
-    } else {
+    } else if (address_is_between(addr, CARTRIDGE_MEMORY_START, CARTRIDGE_MEMORY_END)){
         ret = cartridge_peak(addr);
+    } else {
+        ret = 0;
     }
-
-    CHECKLOG;
-#ifdef LOGFILE
-    fprintf(logfile, "red 0x%04X from address 0x%04X\n", ret, addr);
-#endif
 
     return ret;
 }
@@ -70,7 +72,7 @@ bus_read8(u16 addr) {
     u8 ret = 0;
     if(address_is_between(addr, CPU_MEMORY_START, CPU_MEMORY_SIZE)) {
         ret = ram[addr & CPU_MEMORY_MIRROR_RANGE];
-    } else if(address_is_between(addr, PPU_MEMORY_START, PPU_MEMORY_SIZE)) {
+    } else if(address_is_between(addr, PPU_MEMORY_START, PPU_MEMORY_END)) {
         ret = ppu_cpu_read(addr);
     } else if (addr == CONTROLLER1) {
         ret = (buttonState[0] & 0x80) > 0;
@@ -78,14 +80,11 @@ bus_read8(u16 addr) {
     } else if (addr == CONTROLLER2) {
         ret = (buttonState[1] & 0x80) > 0;
         buttonState[1] <<= 1;
-    } else {
+    } else if (address_is_between(addr, CARTRIDGE_MEMORY_START, CARTRIDGE_MEMORY_END)){
         ret = cartridge_cpu_read_rom(addr);
+    } else {
+        ret = 0;
     }
-
-    CHECKLOG;
-#ifdef LOGFILE
-    fprintf(logfile, "red 0x%04X from address 0x%04X\n", ret, addr);
-#endif
 
     return ret;
 }
@@ -95,19 +94,16 @@ bus_write8(u16 addr, u8 data) {
 
     if(address_is_between(addr, CPU_MEMORY_START, CPU_MEMORY_SIZE)) {
         ram[addr & CPU_MEMORY_MIRROR_RANGE] = data;
-    } else if(address_is_between(addr, PPU_MEMORY_START, PPU_MEMORY_SIZE)) {
+    } else if(address_is_between(addr, PPU_MEMORY_START, PPU_MEMORY_END)
+            || addr == PPU_DMA_WRITE_ADDRESS) {
         ppu_cpu_write(addr, data);
     } else if (addr == CONTROLLER1) {
         buttonState[0] = internalButtonState[0];
     } else if (addr == CONTROLLER2) {
         buttonState[1] = internalButtonState[1];
-    } else {
+    } else if (address_is_between(addr, CARTRIDGE_MEMORY_START, CARTRIDGE_MEMORY_END)){
         cartridge_cpu_write_rom(addr, data);
     }
-    CHECKLOG;
-#ifdef LOGFILE
-    fprintf(logfile, "wrote 0x%04X to address 0x%04X\n", data, addr);
-#endif
 }
 
 // ensure endianess check for this,
