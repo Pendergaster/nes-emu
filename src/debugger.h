@@ -35,22 +35,27 @@ struct nk_image oamImage;
 struct nk_context *ctx;
 struct nk_colorf bg;
 
-
 char** disassemblyTable;
+static const u32 PROGMEM_SIZE = 0x10000 - 0x4020;
+
+//InstructionHashTable disassembly;
 
 static void
 debugger_init(SDL_Window *win) {
 
-    u32 programMemSize = cartridge.numProgramRoms * PROG_ROM_SINGLE_SIZE;
+    //instruction_hashtable_init(&disassembly, sizeof(char), hashmap_find_primeindex(PROGMEM_SIZE));
 
-    disassemblyTable = calloc(programMemSize, sizeof(char *));
-
+    disassemblyTable = calloc(PROGMEM_SIZE, sizeof(char *));
     // program memory start
-    for(u32 i = mapper.programMemStart; i < (mapper.programMemStart + programMemSize); i++) {
+    for(u32 i = CARTRIDGE_MEMORY_START; i <= CARTRIDGE_MEMORY_END; i++) {
 
-        u16 index = i - mapper.programMemStart;
+        u16 index = i - CARTRIDGE_MEMORY_START;
+        u8 valid = 0;
+        u8 opcode = bus_peak8(i, &valid);
+
+        if(!valid) continue;
+
         char* disassembly = malloc(32);
-        u8 opcode = bus_peak8(i);
 
         Instruction instruction = instructionTable[opcode];
         u16 low = 0x0;
@@ -68,10 +73,10 @@ debugger_init(SDL_Window *win) {
           ) {
 
             i++;
-            low = bus_peak8(i);
+            low = bus_peak8(i, NULL);
 
             i++;
-            high = bus_peak8(i);
+            high = bus_peak8(i, NULL);
         }
         else if( instruction.addressMode == IMP || // fetch 0 addresses
                 instruction.addressMode == ACCUM //||
@@ -86,7 +91,7 @@ debugger_init(SDL_Window *win) {
         else // fetch low adress (1 address)
         {
             i++;
-            low = bus_peak8(i); // TODO fix
+            low = bus_peak8(i, NULL); // TODO fix
         }
 
         u16 holeAddr = (high << 8) | low;
@@ -174,7 +179,7 @@ memory_debugger() {
         }
         i32 selected = (int)page == i;
 
-        sprintf ( hexString,"0x%X", (bus_peak8( (page << 8) | i ) & 0xFFFF  ));
+        sprintf ( hexString,"0x%X", (bus_peak8( (page << 8) | i , NULL) & 0xFFFF ));
         if(nk_selectable_label(ctx, hexString, NK_TEXT_LEFT, &selected)) {
             printf("page is 0x0%X\n", i);
             page = i;
@@ -277,7 +282,6 @@ intruction_debugger() {
         }
     }
 
-#if 1
     char* notKnownOperand = "Outside of PRG mem";
     char* errOp = "ERR OP";
 
@@ -285,26 +289,33 @@ intruction_debugger() {
 
     // up
     u16 tempPC = wantedAddr - 1;
+
     for(i32 i = 13; i >= 0; tempPC--) {
 
-        u16 realAddr = 0; //mapper.cpu_translate_peak(tempPC); // TODO fix
-        if(realAddr != 0xFFFF) {
-            if(disassemblyTable[realAddr]) {
-                instructionCache[i] =
-                    (struct InstructionLabel) { .pos = tempPC, .instruction = disassemblyTable[realAddr]};
-                i -= 1;
-            }
-        } else {
+        if( tempPC < 0x4020 ) {
             instructionCache[i] =
                 (struct InstructionLabel) { .pos = tempPC, .instruction = notKnownOperand};
             i -= 1;
+        } else {
+            u16 realAddr = tempPC - 0x4020; //mapper.cpu_translate_peak(tempPC); // TODO fix
+            if(disassemblyTable[realAddr]) {
+                instructionCache[i] = (struct InstructionLabel)
+                {
+                    .pos = tempPC, .instruction = disassemblyTable[realAddr]
+                };
+                i -= 1;
+            }
         }
     }
 
     tempPC = wantedAddr; // Current location
-    u16 realAddr = 0; //mapper.cpu_translate_peak(tempPC); TODO fix
 
-    if(realAddr != 0xFFFF) {
+    if( tempPC < 0x4020 ) {
+        instructionCache[14] =
+            (struct InstructionLabel) { .pos = tempPC, .instruction = notKnownOperand};
+    } else {
+        u16 realAddr = tempPC - 0x4020; // 0; //mapper.cpu_translate_peak(tempPC); TODO fix
+
         if(disassemblyTable[realAddr]) {
             instructionCache[14] =
                 (struct InstructionLabel) { .pos = tempPC, .instruction = disassemblyTable[realAddr]};
@@ -312,56 +323,34 @@ intruction_debugger() {
             instructionCache[14] =
                 (struct InstructionLabel) { .pos = tempPC, .instruction = errOp};
         }
-    } else {
-        // TODO generate lable if now known?
-        instructionCache[14] =
-            (struct InstructionLabel) { .pos = tempPC, .instruction = notKnownOperand};
     }
 
     // down
     tempPC = wantedAddr + 1;
     for(u16 i = 15; i < 29; tempPC++) {
-        u16 realAddr = 0; //mapper.cpu_translate_peak(tempPC); TODO fix
-        if(realAddr != 0xFFFF) {
+
+        if( tempPC < 0x4020 ) {
+            instructionCache[i] =
+                (struct InstructionLabel) { .pos = tempPC, .instruction = notKnownOperand};
+            i += 1;
+        } else {
+
+            u16 realAddr = tempPC - 0x4020;
             if(disassemblyTable[realAddr]) {
                 instructionCache[i] =
                     (struct InstructionLabel) { .pos = tempPC, .instruction = disassemblyTable[realAddr]};
                 i += 1;
             }
-        } else {
-            instructionCache[i] =
-                (struct InstructionLabel) { .pos = tempPC, .instruction = notKnownOperand};
-            i += 1;
         }
     }
-#if 0
-    LOG("");
-    for(u32 i = 0; i < 29; i++) {
-        LOG("%s", instructionCache[i].instruction);
-    }
-    LOG("");
-#endif
+
     for(u16 i = 0; i < 29; i++) {
 
         nk_layout_row_static(ctx, 20, 100, 2);
 
         instruction_label(instructionCache[i], wantedAddr);
 
-#if 0
-        u32 index = (wantedAddr - 15 + i) & 0xFFFF;
-
-        u32 programMemSize = cartridge.numProgramRoms * PROG_ROM_SINGLE_SIZE;
-        u16 realAddr = mapper.cpu_translate_peak(index);
-        //bool selected = 0;
-        char* text;
-        if(realAddr != 0xFFFF) {
-            text = disassemblyTable[realAddr];
-        } else {
-            text = notKnownOperand;
-        }
-#endif
     }
-#endif
 }
 
 static void
@@ -520,7 +509,7 @@ int step = 0, frameSkip = 0;
 static void
 debugger_update() {
 
-#if 0
+#if 1
     u32 windowFlags = 0;
     if (nk_begin(ctx, "General", nk_rect(0, 0, (SCREEN_WIDTH * 0.75), SCREEN_HEIGHT), windowFlags)) {
 

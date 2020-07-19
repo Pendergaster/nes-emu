@@ -2,7 +2,6 @@
  * Check license.txt in project root for license information *
  *********************************************************** */
 
-
 static u8 bus_read8(u16 addr);
 static void bus_write8(u16 addr, u8 data);
 static u16 bus_read16(u16 addr);
@@ -14,8 +13,6 @@ static void bus_write16(u16 addr, u16 data);
 
 #include "defs.h"
 #include "ppu.h"
-
-#include <semaphore.h>
 
 // cpu does not have internal memory so it is connected to memory via bus
 // 0x0 - 0xFFFF  adress range
@@ -45,20 +42,23 @@ u8 buttonState[2];
 u8 internalButtonState[2];
 
 // for debugger, so no state is modified
-static u8
-bus_peak8(u16 addr) {
+static u8 // valid
+bus_peak8(u16 addr, u8* valid) {
 
     u8 ret = 0;
+    if(valid) *valid = 0;
     if(address_is_between(addr, CPU_MEMORY_START, CPU_MEMORY_SIZE)) {
         ret = ram[addr & CPU_MEMORY_MIRROR_RANGE];
+        if(valid) *valid = 1;
     } else if(address_is_between(addr, PPU_MEMORY_START, PPU_MEMORY_END)) {
-        ret = 0x0;
     } else if (addr == CONTROLLER1) {
         ret = (buttonState[0] & 0x80) > 0;
+        if(valid) *valid = 1;
     } else if (addr == CONTROLLER2) {
         ret = (buttonState[1] & 0x80) > 0;
+        if(valid) *valid = 1;
     } else if (address_is_between(addr, CARTRIDGE_MEMORY_START, CARTRIDGE_MEMORY_END)){
-        ret = cartridge_peak(addr);
+        ret = cartridge_peak(addr, valid);
     } else {
         ret = 0;
     }

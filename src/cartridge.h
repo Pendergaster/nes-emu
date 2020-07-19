@@ -6,6 +6,11 @@
 #define CARTRIDGE_H
 
 #include "fileload.h"
+#include "mapperdata.h"
+
+#define PROG_ROM_SINGLE_SIZE    16384
+#define CHAR_ROM_SINGLE_SIZE    8192
+#define TRAINER_SIZE            512
 
 // Because we dont know before hand which mapper will be used
 // this structure will store mapper functions
@@ -18,8 +23,6 @@ typedef enum MirrorType {
 } MirrorType;
 
 struct Cartridge {
-    u8*         characterMemory;
-    u8*         programMemory;
 
     u32         mapperID;
     u32         numProgramRoms;
@@ -28,17 +31,36 @@ struct Cartridge {
     MirrorType  mirrorType;
 } cartridge;
 
+typedef union MapperData MapperData;
+
+typedef u8   (*peak_func)(MapperData* /*data*/, u16 /*addr*/, u8* /*valid*/);
+typedef u8   (*cpu_read_func)(MapperData* /*data*/, u16 /*addr*/);
+typedef void (*cpu_write_func)(MapperData* /*data*/, u16 /*addr*/, u8 /*val*/);
+typedef u8   (*ppu_read_func)(MapperData* /*data*/, u16 /*addr*/);
+typedef void (*ppu_write_func)(MapperData* /*data*/, u16 /*addr*/, u8 /*val*/);
+typedef void (*mapper_init_func)(MapperData* /*data*/, u8* progMem, u8* charMem);
+typedef void (*mapper_dispose_func)(MapperData* /*data*/);
+
+union MapperData {
+    Mapper0Data mapper0;
+    //Mapper1Data mapper1;
+};
+
 struct Mapper {
-    u8      (*cpu_peak_cartridge)(u16 /*addr*/);
-    u8      (*cpu_read_cartridge)(u16 /*addr*/);
-    void    (*cpu_write_cartridge)(u16 /*addr*/, u8 /*val*/);
-    u8      (*ppu_read_cartridge)(u16 /*addr*/);
-    void    (*ppu_write_cartridge)(u16 /*addr*/, u8 /*val*/);
-    u16     programMemStart;
+    peak_func           cpu_peak_cartridge;
+    cpu_read_func       cpu_read_cartridge;
+    cpu_write_func      cpu_write_cartridge;
+    ppu_read_func       ppu_read_cartridge;
+    ppu_write_func      ppu_write_cartridge;
+    mapper_init_func    mapper_init;
+    mapper_dispose_func mapper_dispose;
+    MapperData          data;
 } mapper;
 
 #include "mappers.h"
 
+
+//STATIC_ASSERT(sizeof(union MapperData) == sizeof(u8*), mapper_union_size_wrong);
 
 // https://wiki.nesdev.com/w/index.php/INES
 // https://formats.kaitai.io/ines/index.html
@@ -65,10 +87,6 @@ STATIC_ASSERT(sizeof(INESHeader) == 16, header_size_wrong);
 // PlayChoice INST-ROM, if present (0 or 8192 bytes)
 // PlayChoice PROM, if present (16 bytes Data, 16 bytes CounterOut)
 //                  (this is often missing, see PC10 ROM-Images for details)
-
-#define PROG_ROM_SINGLE_SIZE    16384
-#define CHAR_ROM_SINGLE_SIZE    8192
-#define TRAINER_SIZE            512
 
 static void
 cartridge_load(const char* name) {
@@ -101,13 +119,9 @@ cartridge_load(const char* name) {
 
     cartridge.numProgramRoms = header.programRomCount;
     cartridge.numCharacterRoms = header.charaterRomCount;
-
-    cartridge.programMemory = calloc(cartridge.numProgramRoms, PROG_ROM_SINGLE_SIZE);
-    cartridge.characterMemory = calloc(cartridge.numCharacterRoms, CHAR_ROM_SINGLE_SIZE);
-
-    memcpy(cartridge.programMemory, data, cartridge.numProgramRoms * PROG_ROM_SINGLE_SIZE);
+    u8* programMemory = data;
     data += cartridge.numProgramRoms * PROG_ROM_SINGLE_SIZE;
-    memcpy(cartridge.characterMemory, data, cartridge.numCharacterRoms * CHAR_ROM_SINGLE_SIZE);
+    u8* characterMemory = data;
     data += cartridge.numCharacterRoms * CHAR_ROM_SINGLE_SIZE;
 
     // print signature
@@ -125,50 +139,48 @@ cartridge_load(const char* name) {
         default:
             ABORT("NOT IMPLEMENTED MAPPER %d", cartridge.mapperID);
             break;
-
     }
+
+    if(mapper.mapper_init) mapper.mapper_init(&mapper.data, programMemory, characterMemory);
 
     free(to_free);
 }
 
+void
+cartridge_dispose() {
+    if(mapper.mapper_dispose) mapper.mapper_dispose(&mapper.data);
+}
+
 u8
-cartridge_peak(u16 addr) {
+cartridge_peak(u16 addr, u8* valid) {
 
-    u16 actualAddr = mapper.cpu_read_cartridge(addr);
-
-    if(actualAddr == 0xFFFF) return 0xFF;
-
-    if(actualAddr >= cartridge.numProgramRoms * PROG_ROM_SINGLE_SIZE) ABORT("mem overflow");
-
-    u8 data = cartridge.programMemory[actualAddr];
-
-    return data;
+    return mapper.cpu_peak_cartridge(&mapper.data, addr, valid);
 }
 
 static inline u8
 cartridge_cpu_read_rom(u16 addr) {
 
-    return mapper.cpu_read_cartridge(addr);
+    return mapper.cpu_read_cartridge(&mapper.data, addr);
 }
 
 
 static inline void
 cartridge_cpu_write_rom(u16 addr, u8 val) {
 
-    mapper.cpu_write_cartridge(addr, val);
+    mapper.cpu_write_cartridge(&mapper.data, addr, val);
 }
 
 
 static inline u8
 cartridge_ppu_read_rom(u16 addr) {
 
-    return mapper.ppu_read_cartridge(addr);
+    return mapper.ppu_read_cartridge(&mapper.data, addr);
 }
 
 void
 cartridge_ppu_write_rom(u16 addr, u8 val) {
 
-    mapper.ppu_write_cartridge(addr, val);
+    mapper.ppu_write_cartridge(&mapper.data, addr, val);
 }
 
 #endif /* CARTRIDGE_H */

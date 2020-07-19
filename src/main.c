@@ -21,11 +21,12 @@ const u32 SCREEN_WIDTH = 1800, SCREEN_HEIGHT = 1000;
 #include "input.h"
 #include "debugger.h"
 
+SDL_Window *window;
 
-int
-main(int argc, char** argv) {
-    printf("hello\n");
+static void
+initialize(char* rom) {
 
+    // Initialize SDL, backbuffers and OpenGL
     SDL_Init( SDL_INIT_VIDEO | SDL_INIT_JOYSTICK);
     SDL_GL_SetAttribute( SDL_GL_DOUBLEBUFFER, 1 );
     SDL_GL_SetAttribute( SDL_GL_ACCELERATED_VISUAL, 1 );
@@ -38,46 +39,46 @@ main(int argc, char** argv) {
     SDL_GL_SetAttribute( SDL_GL_CONTEXT_MINOR_VERSION, 2 );
     SDL_GL_SetAttribute( SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE );
 
-
-    if(!SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1")) {
-        printf("not set!\n");
-    }
-
     if(!SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1")) {
-        printf("not set!\n");
+        printf("failed to set hint!\n");
     }
 
-    SDL_Window *window = SDL_CreateWindow("nes-emu",
+    window = SDL_CreateWindow("nes-emu",
             SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
             SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN);
 
     assert(window);
-    SDL_GLContext Context = SDL_GL_CreateContext(window); (void) Context;
+    SDL_GL_CreateContext(window);
 
-    if(argc == 2) {
-        cartridge_load(argv[1]);
-    } else {
-        cartridge_load("roms/nestest.nes");
-    }
+    // Load cartridge, init cpu, ppu and gamepad
+    cartridge_load(rom);
     cpu_reset();
-
-    LOG_COLOR(CONSOLE_COLOR_BLUE ,"cpu debugger init");
-
     ppu_init();
     debugger_init(window);
+    gamepad_init();
 
-    LOG_COLOR(CONSOLE_COLOR_BLUE ,"cpu debugger inited");
+    LOG_COLOR(CONSOLE_COLOR_BLUE ,"all initialized");
+}
+
+static void
+cleanup() {
+    nk_sdl_shutdown();
+    //TODO clean everything up
+    LOG("everything shutdown correctly...");
+}
+
+int
+main(int argc, char** argv) {
+
+    if(argc != 2) {
+        printf("specify lodable rom\n");
+    }
+
+    initialize(argv[1]);
 
     int running = 1;
-    LOG("All initialized");
-    LOG_COLOR(CONSOLE_COLOR_GREEN ,"All initialized");
-
-    init_gamepad();
-
-    LOG("All initialized");
 
     u32 updateCounter = 0;
-
     u32 currentTime;
     u32 lastTime = currentTime = SDL_GetTicks();
 
@@ -85,6 +86,7 @@ main(int argc, char** argv) {
 
     while (running) {
 
+        // update game pad and run while esc key is pressed
         running = keystate_update();
 
         if(debug == 0) { //debug update
@@ -160,21 +162,22 @@ main(int argc, char** argv) {
                 ppu.frameComplete = 0;
             }
         }
+
         debugger_update();
 
+        // Make sure view port is correct if window is resized
         i32 winWidth, winHeight;
         SDL_GetWindowSize(window, &winWidth, &winHeight);
         glViewport(0, 0, winWidth, winHeight);
+
+        // CLear window and draw game and debugger
         glClear(GL_COLOR_BUFFER_BIT);
         glClearColor( 0, 0, 0, 0);
-        debugger_draw();
-
         ppu_render();
+        debugger_draw();
 
         SDL_GL_SwapWindow(window);
     }
 
-    nk_sdl_shutdown();
-    //TODO clean everything up
-    LOG("everything shutdown correctly...");
+    cleanup();
 }

@@ -132,7 +132,6 @@ struct PPU {
     u8          palette[32];                    // color palette 0x3F00 - 0x3FFF
 
     OAM         oam;
-
     // Viewable variables
     //u8      paletteView[0x40];
     //u8*     screenSprite;
@@ -390,6 +389,14 @@ ppu_dma_oam(u32 systemClock) {
                 for(u32 i = 0; i <= 0xFF; i++) {
                     ppu.oam.primary[i] = bus_read8((ppu.oam.DMAaddr << 8) | i);
                 }
+#if 0
+                OAMData* data = (OAMData*)ppu.oam.primary;
+                LOG("");
+                for(u32 i = 0; i < 64; i++) {
+                    LOG("num %d DATA :%d %d %d %d", i,
+                            data[i].yPos, data[i].xPos, data[i].attributes, data[i].tileIndex);
+                }
+#endif
                 ppu.oam.DMAactive = DMANotActive;
                 cpu.cycles += 0xFF * 2;
             } break;
@@ -610,8 +617,9 @@ ppu_clock() {
                 if(ppu.loopyV.fineY < 7) {
                     ppu.loopyV.fineY += 1;
                 } else {
-                    ASSERT_MESSAGE((u16)ppu.loopyV.coarseY < 30u,
-                            "coarse Y overflow! %d", (u16)ppu.loopyV.coarseY);
+                    // TODO ???
+                    //ASSERT_MESSAGE((u16)ppu.loopyV.coarseY < 30u,
+                    //        "coarse Y overflow! %d", (u16)ppu.loopyV.coarseY);
 
 
                     ppu.loopyV.fineY = 0;
@@ -971,11 +979,11 @@ ppu_render_oam() { // there is 2 pattern tables so this is 0 or 1
     OAMData* data = (OAMData*)ppu.oam.primary; // TODO fix pointer cast
     for(u16 tileY = 0; tileY < 8; tileY++) { // FOR TILE Y
 
-        for(u16 tileX = 0; tileX <= 8; tileX++) { // FOR TILE X
+        for(u16 tileX = 0; tileX < 8; tileX++) { // FOR TILE X
 
-            if(data[(tileY * 8) + tileX].yPos == 0xFF) {
-                continue;
-            }
+            //if(data[(tileY * 8) + tileX].yPos >= 240 /*|| data[(tileY * 8) + tileX].attributes == 0*/) {
+            //    continue;
+            //}
 
             u8 palette = (data[(tileY * 8) + tileX].attributes &
                     (SpritePaletteLow | SpritePaletteHigh)) + 4;
