@@ -8,8 +8,8 @@
 #include "fileload.h"
 #include "mapperdata.h"
 
-#define PROG_ROM_SINGLE_SIZE    16384
-#define CHAR_ROM_SINGLE_SIZE    8192
+#define PROG_ROM_SINGLE_SIZE    0x4000 // 16 K
+#define CHAR_ROM_SINGLE_SIZE    0x2000 // 8 K
 #define TRAINER_SIZE            512
 
 // Because we dont know before hand which mapper will be used
@@ -23,11 +23,9 @@ typedef enum MirrorType {
 } MirrorType;
 
 struct Cartridge {
-
     u32         mapperID;
     u32         numProgramRoms;
     u32         numCharacterRoms;
-
     MirrorType  mirrorType;
 } cartridge;
 
@@ -43,7 +41,7 @@ typedef void (*mapper_dispose_func)(MapperData* /*data*/);
 
 union MapperData {
     Mapper0Data mapper0;
-    //Mapper1Data mapper1;
+    Mapper1Data mapper1;
 };
 
 struct Mapper {
@@ -71,8 +69,8 @@ typedef struct INESHeader {
     u8      flag6;
     u8      flag7;
     u8      programRamLen;
-    u8      flags9; //rarely used
-    u8      flags10; //rarely used
+    u8      flags9;  // Rarely used
+    u8      flags10; // Rarely used
     char    reserved[5];
 } INESHeader;
 
@@ -115,14 +113,18 @@ cartridge_load(const char* name) {
 
     // (high << 4) | low;
 
-    // type 1 file format TODO rest of them
+    // type 1 file format TODO rest of them ??
 
     cartridge.numProgramRoms = header.programRomCount;
     cartridge.numCharacterRoms = header.charaterRomCount;
+
+    ASSERT_MESSAGE(cartridge.numProgramRoms, "No PRG roms detected");
+
     u8* programMemory = data;
     data += cartridge.numProgramRoms * PROG_ROM_SINGLE_SIZE;
     u8* characterMemory = data;
     data += cartridge.numCharacterRoms * CHAR_ROM_SINGLE_SIZE;
+
 
     // print signature
     char signatureName[4] = {};
@@ -135,6 +137,9 @@ cartridge_load(const char* name) {
 
         case 0:
             mapper = mapper0;
+            break;
+        case 1:
+            mapper = mapper1;
             break;
         default:
             ABORT("NOT IMPLEMENTED MAPPER %d", cartridge.mapperID);

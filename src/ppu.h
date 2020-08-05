@@ -227,13 +227,13 @@ ppu_read(u16 addr) {
     } else if (address_is_between(addr,
                 PPU_NAMETABLE_MEMORY_START, PPU_NAMETABLE_MEMORY_END)) {
 
+        addr &= 0x0FFF;
         switch(cartridge.mirrorType){
             case VERTICAL:
                 {
                     //[0][1]
                     //[0][1]
 
-                    addr &= 0x0FFF;
                     u16 readAddr = addr % NAMETABLE_SIZE;
 
                     if(addr < NAMETABLE_SIZE) {
@@ -250,7 +250,6 @@ ppu_read(u16 addr) {
                 {
                     //[0][0]
                     //[1][1]
-                    addr &= 0x0FFF;
                     u16 readAddr = addr % NAMETABLE_SIZE;
                     if(addr < NAMETABLE_SIZE * 2) {
                         data =  ppu.nameTables[readAddr];
@@ -259,8 +258,19 @@ ppu_read(u16 addr) {
                         data =  ppu.nameTables[NAMETABLE_SIZE + readAddr];
                     }
                 } break;
+
+            case ONESCREEN_LO:
+                {
+                    u16 readAddr = addr % NAMETABLE_SIZE;
+                    data = ppu.nameTables[readAddr];
+                } break;
+            case ONESCREEN_HI:
+                {
+                    u16 readAddr = addr % NAMETABLE_SIZE;
+                    data = ppu.nameTables[NAMETABLE_SIZE + readAddr];
+                } break;
             default:
-                ABORT("unknown mirroring type");
+                ABORT("unknown mirroring type %d", cartridge.mirrorType);
 
         }
 
@@ -300,13 +310,13 @@ ppu_write(u16 addr, u8 data) {
     } else if (address_is_between(addr,
                 PPU_NAMETABLE_MEMORY_START, PPU_NAMETABLE_MEMORY_END)) {
 
+        addr &= 0x0FFF;
         switch(cartridge.mirrorType){
             case VERTICAL:
                 {
                     //[0][1]
                     //[0][1]
 
-                    addr &= 0x0FFF;
                     u16 readAddr = addr % NAMETABLE_SIZE;
 
                     if(addr < NAMETABLE_SIZE) {
@@ -324,7 +334,6 @@ ppu_write(u16 addr, u8 data) {
 
                     //[0][0]
                     //[1][1]
-                    addr &= 0x0FFF;
                     u16 readAddr = addr % NAMETABLE_SIZE;
 
                     if(addr < NAMETABLE_SIZE * 2) {
@@ -333,8 +342,18 @@ ppu_write(u16 addr, u8 data) {
                         ppu.nameTables[NAMETABLE_SIZE + readAddr] = data;
                     }
                 } break;
+            case ONESCREEN_LO:
+                {
+                    u16 readAddr = addr % NAMETABLE_SIZE;
+                    ppu.nameTables[readAddr] = data;
+                } break;
+            case ONESCREEN_HI:
+                {
+                    u16 readAddr = addr % NAMETABLE_SIZE;
+                    ppu.nameTables[NAMETABLE_SIZE + readAddr] = data;
+                } break;
             default:
-                ABORT("unknown mirroring type");
+                ABORT("unknown mirroring type %d", cartridge.mirrorType);
 
         }
 

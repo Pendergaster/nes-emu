@@ -2,8 +2,8 @@
 clear
 
 if [ ! -d ./build ]; then
-    echo "Creating $BUILD_DIR"
-    mkdir $BUILD_DIR
+    echo "Creating build dir"
+    mkdir ./build
 fi
 
 echo "Building..."

@@ -51,56 +51,12 @@ debugger_init(SDL_Window *win) {
 
         u16 index = i - CARTRIDGE_MEMORY_START;
         u8 valid = 0;
-        u8 opcode = bus_peak8(i, &valid);
+        bus_peak8(i, &valid);
 
         if(!valid) continue;
 
         char* disassembly = malloc(32);
-
-        Instruction instruction = instructionTable[opcode];
-        u16 low = 0x0;
-        u16 high = 0x0;
-
-        u32 instLen = strlen(cpuInstructionStrings[opcode]);
-        memcpy(disassembly ,cpuInstructionStrings[opcode], instLen);
-
-        disassembly[instLen] = ' ';
-
-        if(instruction.addressMode == ABS ||                // fetch 2 addresses
-                instruction.addressMode == ABSX ||
-                instruction.addressMode == ABSY ||
-                instruction.addressMode == IND
-          ) {
-
-            i++;
-            low = bus_peak8(i, NULL);
-
-            i++;
-            high = bus_peak8(i, NULL);
-        }
-        else if( instruction.addressMode == IMP || // fetch 0 addresses
-                instruction.addressMode == ACCUM //||
-                //instruction.addressMode == IMM
-               )
-        {
-            disassembly[instLen + 1] = 0;
-            disassemblyTable[index] = disassembly;
-
-            continue;
-        }
-        else // fetch low adress (1 address)
-        {
-            i++;
-            low = bus_peak8(i, NULL); // TODO fix
-        }
-
-        u16 holeAddr = (high << 8) | low;
-        char temp[32];
-
-        sprintf(temp, "0x%04X", holeAddr);
-
-        int hexStringSize = strlen(temp) + 1;
-        memcpy(&disassembly[instLen + 1], temp, hexStringSize);
+        i += create_instruction_str(disassembly, i);
 
         disassemblyTable[index] = disassembly;
     }
@@ -265,6 +221,8 @@ intruction_debugger() {
 
         if(breakLen != 0) {
             breakpoint = (u16)strtol(breakString, NULL, 16);
+        } else {
+            breakpoint = 0x10000;
         }
     }
     {
@@ -368,6 +326,14 @@ nametable_debugger() {
         case HORIZONTAL:
             {
                 nk_label(ctx, "Horizontal Mirroring", NK_TEXT_LEFT);
+            } break;
+        case ONESCREEN_LO:
+            {
+                nk_label(ctx, "One screen low mirroring", NK_TEXT_LEFT);
+            } break;
+        case ONESCREEN_HI:
+            {
+                nk_label(ctx, "One screen high mirroring", NK_TEXT_LEFT);
             } break;
         default:
             ABORT("unknown mirroring type");
@@ -536,6 +502,12 @@ debugger_update() {
     nk_end(ctx);
 
     if (nk_begin(ctx, "Side Bar", nk_rect((SCREEN_WIDTH * 0.75), 0, (SCREEN_WIDTH * 0.25), SCREEN_HEIGHT), windowFlags)) {
+
+        nk_layout_row_static(ctx, 70, 120, 1);
+
+        char temp[32];
+        create_instruction_str(temp, cpu.pc);
+        nk_label(ctx, temp, NK_TEXT_LEFT);
 
         nk_layout_row_static(ctx, 30, 80, 1);
 

@@ -7,162 +7,64 @@
 
 #include "mapperdata.h"
 
-// This file just implements the mapping functions
+typedef struct DisasseblyTable {
+    char** disassebly;
+    //y8
+} DisasseblyTable ;
 
-#define MAP0_START              0x8000
-#define MAP0_END                0xFFFF
-#define MAP0_PPU_DATA_SIZE      0x1FFF
+static inline u32
+create_instruction_str(char* str, u32 addr) {
 
-void
-mapper0_init(Mapper0Data* data, u8* progMem, u8* charMem) {
+    u8 opcode = bus_peak8(addr, NULL);
+    Instruction instruction = instructionTable[opcode];
+    u16 low = 0x0;
+    u16 high = 0x0;
 
-    data->programMemory = calloc(cartridge.numProgramRoms, PROG_ROM_SINGLE_SIZE);
-    data->characterMemory = calloc(cartridge.numCharacterRoms, CHAR_ROM_SINGLE_SIZE);
+    u32 instLen = strlen(cpuInstructionStrings[opcode]);
+    memcpy(str ,cpuInstructionStrings[opcode], instLen);
 
-    memcpy(data->programMemory, progMem,
-            cartridge.numProgramRoms * PROG_ROM_SINGLE_SIZE);
-    memcpy(data->characterMemory, charMem,
-            cartridge.numCharacterRoms * CHAR_ROM_SINGLE_SIZE);
-}
+    str[instLen] = ' ';
 
-void
-mapper0_dispose(Mapper0Data* data) {
+    u32 skip = 0;
 
-    free(data->programMemory);
-    free(data->characterMemory);
-}
+    if(instruction.addressMode == ABS ||                // fetch 2 addresses
+            instruction.addressMode == ABSX ||
+            instruction.addressMode == ABSY ||
+            instruction.addressMode == IND
+      ) {
 
-u8
-mapper0_cpu_peak(Mapper0Data* data, u16 addr, u8* valid) {
+        skip++;
+        low = bus_peak8(addr + skip, NULL);
 
-    if(!address_is_between(addr, MAP0_START, MAP0_END))  return 0;
-
-    if(cartridge.numProgramRoms == 1)
-        addr &= 0x3FFF; // if 1 rom capasity is 16K
-    else
-        addr &= 0x7FFF; // if 2 rom capasity is 32K
-
-    u8 ret = data->programMemory[addr];
-
-    if(valid) *valid = 1;
-    return ret;
-}
-
-u8
-mapper0_cpu_read(Mapper0Data* data, u16 addr) {
-
-    if(!address_is_between(addr, MAP0_START, MAP0_END)) {
-        return 0;
+        skip++;
+        high = bus_peak8(addr + skip, NULL);
+    }
+    else if( instruction.addressMode == IMP || // fetch 0 addresses
+            instruction.addressMode == ACCUM //||
+            //instruction.addressMode == IMM
+           )
+    {
+        str[instLen + 1] = 0;
+        return skip;
+    }
+    else // fetch low adress (1 address)
+    {
+        skip++;
+        low = bus_peak8(addr + skip, NULL); // TODO fix
     }
 
-    if(cartridge.numProgramRoms == 1)
-        addr &= 0x3FFF; // if 1 rom capasity is 16K
-    else
-        addr &= 0x7FFF; // if 2 rom capasity is 32K
+    u16 holeAddr = (high << 8) | low;
+    char temp[32];
 
-    return data->programMemory[addr];
+    sprintf(temp, "0x%04X", holeAddr);
+
+    int hexStringSize = strlen(temp) + 1;
+    memcpy(&str[instLen + 1], temp, hexStringSize);
+
+    return skip;
 }
 
-void
-mapper0_cpu_write(Mapper0Data* data, u16 addr, u8 val) {
+#include "nrom.h"
+#include "mmc1.h"
 
-    if(!address_is_between(addr, MAP0_START, MAP0_END)) {
-        ABORT("invalid address in mapper0 0x%04X", addr);
-        return;
-    }
-
-    if(cartridge.numProgramRoms == 1)
-        addr &= 0x3FFF; // if 1 rom capasity is 16K
-    else
-        addr &= 0x7FFF; // if 2 rom capasity is 32K
-
-    data->programMemory[addr] = val;
-}
-
-u8
-mapper0_ppu_read(Mapper0Data* data, u16 addr) {
-
-    if(!address_is_between(addr, 0, MAP0_PPU_DATA_SIZE))
-        ABORT("invalid address in mapper0 0x%04X", addr);
-
-    return data->characterMemory[addr];
-}
-
-void
-mapper0_ppu_write(Mapper0Data* data, u16 addr, u8 val) {
-
-    if(!address_is_between(addr, 0, MAP0_PPU_DATA_SIZE)) ABORT("invalid address in mapper0");
-
-    data->characterMemory[addr] = val;
-}
-
-struct Mapper mapper0 = {
-    .cpu_peak_cartridge     = (peak_func)mapper0_cpu_peak,
-    .cpu_read_cartridge     = (cpu_read_func)mapper0_cpu_read,
-    .cpu_write_cartridge    = (cpu_write_func)mapper0_cpu_write,
-    .ppu_read_cartridge     = (ppu_read_func)mapper0_ppu_read,
-    .ppu_write_cartridge    = (ppu_write_func)mapper0_ppu_write,
-    .mapper_init            = (mapper_init_func)mapper0_init,
-    .mapper_dispose         = (mapper_dispose_func)mapper0_dispose
-};
-
-#if 0
-
-#define MAPPER1_CONTROL_BIT     0x8000
-#define MAP1_START              0x6000
-#define MAP1_END                0xFFFF
-
-typedef struct Mapper1Data {
-} Mapper1Data;
-
-void
-mapper1_init() {
-    ABORT("TODO");
-}
-
-u8
-mapper1_cpu_peak(u16 addr, u8* valid) {
-    ABORT("TODO");
-    return 0;
-}
-
-u8
-mapper1_cpu_read(u16 addr) {
-
-    if(!address_is_between(addr, MAP1_START, MAP1_END))  return 0;
-
-    ABORT("TODO");
-    return 0;
-}
-
-void
-mapper1_cpu_write(u16 addr, u8 data) {
-
-    if(!address_is_between(addr, MAP1_START, MAP1_END))  return;
-
-    ABORT("TODO");
-}
-
-u8
-mapper1_ppu_read(u16 addr) {
-    ABORT("TODO");
-    return 0;
-}
-
-void
-mapper1_ppu_write(u16 addr, u8 data) {
-    ABORT("TODO");
-}
-
-
-struct Mapper mapper1 = {
-    .cpu_peak_cartridge     = mapper1_cpu_peak,
-    .cpu_read_cartridge     = mapper1_cpu_read,
-    .cpu_write_cartridge    = mapper1_cpu_write,
-    .ppu_read_cartridge     = mapper1_ppu_read,
-    .ppu_write_cartridge    = mapper1_ppu_write,
-    .mapper_init            = mapper1_init,
-};
-
-#endif
 #endif /* MAPPERS_H */

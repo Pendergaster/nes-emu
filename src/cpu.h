@@ -308,7 +308,7 @@ cpu_return_from_interrupt() { // RTI
 
 
 int debug = 0;
-u16 breakpoint = 0;
+i32 breakpoint = 0x10000;
 u16 instructionCountBreakPoint = 0;
 static u8
 cpu_clock() {
@@ -318,6 +318,7 @@ cpu_clock() {
     u8 ret = cpu.cycles == 0;
 
     if(cpu.cycles == 0) {
+
         u8 opcode = bus_read8(cpu.pc);
 
         // TODO remove all logs
@@ -490,11 +491,6 @@ cpu_clock() {
                     // so if two high bits are same on operants and different on result set it
                     cpu_set_flag(Overflow, (cpu.accumReq ^ (u8)(temp & 0x00FF)) &
                             (fetched ^ (u8)(temp & 0x00FF)) & 0x80);
-#if 0
-                    cpu_set_flag(Overflow,
-                            (~((uint16_t)cpu.accumReq ^ (uint16_t)fetched) &
-                             ((uint16_t)cpu.accumReq ^ (uint16_t)temp)) & 0x0080);
-#endif
 
                     cpu.accumReq = temp & 0x00FF;
                 } break;
