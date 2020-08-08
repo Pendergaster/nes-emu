@@ -5,11 +5,31 @@
 #ifndef MAPPERDATA_H
 #define MAPPERDATA_H
 
+char* notKnownOperand = "Outside of PRG mem";
+
+typedef struct DisasseblyTable {
+    char* disassebly; // PROG_ROM_SINGLE_SIZE of 20 sized blocks of strings
+} DisasseblyTable ;
+
+/* Common data to mapper */
+typedef struct MapperHeader {
+
+    u8*                 characterMemory;
+    u32                 characterMemoryLen;
+
+    u8*                 programMemory;
+    u32                 programMemoryLen;
+
+    // Table for each bank
+    u32                 numPrgBanks;
+    DisasseblyTable*    tables;
+} MapperHeader;
+
 typedef struct Mapper0Data {
-    u8* characterMemory;
-    u8* programMemory;
+    MapperHeader head;
 } Mapper0Data;
 
+#if 1
 typedef enum MAP1ControllerReqData {
     Map1MirroringMode   = (0x3),
     Map1PRGBankMode     = (0xC),
@@ -17,13 +37,8 @@ typedef enum MAP1ControllerReqData {
 } MAP1ControllerReqData ;
 
 typedef struct Mapper1Data {
-    u8*     characterMemory;    /* $0000-$0FFF: 4 KB switchable CHR bank
-                                  $1000-$1FFF: 4 KB switchable CHR bank */
-    u32     characterMemoryLen;
 
-    u8*     programMemory;
-    u32     programMemoryLen;
-
+    MapperHeader head;
     u8*     programRAM;         // $6000-$7FFF: 8 KB PRG RAM bank
 
     /*  How the shift reqister works
@@ -70,9 +85,6 @@ typedef struct Mapper1Data {
      * +----- PRG RAM chip enable (0: enabled; 1: disabled; ignored on MMC1A)
      */
     u8      prgBankReqister;
-
-    /* Debugger info */
-    char** disasseblies[3];
 } Mapper1Data;
-
+#endif
 #endif /* MAPPERDATA_H */

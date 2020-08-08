@@ -25,39 +25,81 @@
 void
 mapper1_init(Mapper1Data* data, u8* progMem, u8* charMem) {
 
-    data->programMemory = calloc(cartridge.numProgramRoms, PROG_ROM_SINGLE_SIZE);
-    data->programMemoryLen = cartridge.numProgramRoms * PROG_ROM_SINGLE_SIZE;
-
-
-    if(cartridge.numCharacterRoms) {
-        data->characterMemory = calloc(cartridge.numCharacterRoms, CHAR_ROM_SINGLE_SIZE);
-        data->characterMemoryLen = cartridge.numCharacterRoms * CHAR_ROM_SINGLE_SIZE;
-    } else {
-        data->characterMemory = calloc(1, CHAR_ROM_SINGLE_SIZE);
-        data->characterMemoryLen = CHAR_ROM_SINGLE_SIZE;
-    }
+    mapperheader_init(&data->head, progMem, charMem);
 
     data->programRAM = calloc(MAP1_RAM_SIZE, 1);
-
-    memcpy(data->programMemory, progMem,
-            cartridge.numProgramRoms * PROG_ROM_SINGLE_SIZE);
-    memcpy(data->characterMemory, charMem,
-            cartridge.numCharacterRoms * CHAR_ROM_SINGLE_SIZE);
-
     data->controlReqister = 0xF;
 }
 
-char*
-mapper1_dissassemble_lookup(u16 addr) {
+u32 _mapper1_get_prg_addr(Mapper1Data* data, u16 addr) {
 
+    if(addr < MAP1_CONTROL_START ) return numeric_max_u32;
+
+    u8 prgRomMode = (data->controlReqister & Map1PRGBankMode) >> 2;
+
+    switch (prgRomMode) {
+        case 0: case 1:
+            {
+                // switch 32 KB at $8000, ignoring low bit of bank number
+                u8 bank = data->prgBankReqister & 0xE;
+                u32 address = (addr - 0x8000) + (bank * 0x8000 /*32kb*/);
+
+                //LOG("addr 0x%04X", address);
+
+                ASSERT_MESSAGE(address < data->head.programMemoryLen, "MMC1 prg mem invalid address");
+                return address;
+            } break;
+        case 2:
+            {
+                // fix first bank at $8000 and switch 16 KB bank at $C000
+                if(addr >= 0xC000) {
+                    u32 address = addr - 0x8000;
+                    ASSERT_MESSAGE(address < data->head.programMemoryLen, "MMC1 prg mem invalid address");
+                    return address;
+                } else {
+                    u8 bank = data->prgBankReqister;
+                    u32 address = (addr - 0xC000) + (bank * 0x4000 /*16kb*/);
+                    ASSERT_MESSAGE(address < data->head.programMemoryLen, "MMC1 prg mem invalid address");
+                    return address;
+                }
+            } break;
+        case 3:
+            {
+                // fix last bank at $C000 and switch 16 KB bank at $8000
+                if(addr >= 0xC000) {
+                    // last bank
+                    u32 address = (data->head.programMemoryLen - PROG_ROM_SINGLE_SIZE) + (addr - 0xC000);
+                    ASSERT_MESSAGE(address < data->head.programMemoryLen, "MMC1 prg mem invalid address");
+                    return address;
+                } else {
+                    u8 bank = data->prgBankReqister;
+                    u32 address = (addr - 0x8000) + (bank * 0x4000 /*16kb*/);
+                    ASSERT_MESSAGE(address < data->head.programMemoryLen, "MMC1 prg mem invalid address");
+                    return address;
+                }
+
+            } break;
+        default:
+            ABORT("MMC1 unknown PRG ROM mode 0x%04X", prgRomMode);
+            break;
+    }
+
+    return numeric_max_u32;
+}
+
+char*
+mapper1_disassemble(Mapper1Data* data, u16 addr) {
+
+    u32 address =_mapper1_get_prg_addr(data, addr);
+    if(address == numeric_max_u32) return notKnownOperand;
+    return disassemblytable_read(&data->head, address);
 }
 
 
 void
 mapper1_dispose(Mapper1Data* data) {
 
-    free(data->programMemory);
-    free(data->characterMemory);
+    mapperheader_dispose(&data->head);
     free(data->programRAM);
 
     memset(data, 0 ,sizeof *data);
@@ -77,61 +119,9 @@ mapper1_cpu_read(Mapper1Data* data, u16 addr) {
         return 0;
     }
 
-    //ASSERT_MESSAGE(addr >= 0x8000, "invalid address in MMC1 mapper 0x%04X", addr);
-
-    u8 prgRomMode = (data->controlReqister & Map1PRGBankMode) >> 2;
-
-    //printf("addr 0x%04X %d\n", addr, (int)prgRomMode);
-    //exit(1);
-
-    switch (prgRomMode) {
-        case 0: case 1:
-            {
-                // switch 32 KB at $8000, ignoring low bit of bank number
-                u8 bank = data->prgBankReqister & 0xE;
-                u32 address = (addr - 0x8000) + (bank * 0x8000 /*32kb*/);
-
-                //LOG("addr 0x%04X", address);
-
-                ASSERT_MESSAGE(address < data->programMemoryLen, "MMC1 prg mem invalid address");
-                return data->programMemory[address];
-            } break;
-        case 2:
-            {
-                // fix first bank at $8000 and switch 16 KB bank at $C000
-                if(addr >= 0xC000) {
-                    u32 address = addr - 0x8000;
-                    ASSERT_MESSAGE(address < data->programMemoryLen, "MMC1 prg mem invalid address");
-                    return data->programMemory[address];
-                } else {
-                    u8 bank = data->prgBankReqister;
-                    u32 address = (addr - 0xC000) + (bank * 0x4000 /*16kb*/);
-                    ASSERT_MESSAGE(address < data->programMemoryLen, "MMC1 prg mem invalid address");
-                    return data->programMemory[address];
-                }
-            } break;
-        case 3:
-            {
-                // fix last bank at $C000 and switch 16 KB bank at $8000
-                if(addr >= 0xC000) {
-                    // last bank
-                    u32 address = (data->programMemoryLen - PROG_ROM_SINGLE_SIZE) + (addr - 0xC000);
-                    ASSERT_MESSAGE(address < data->programMemoryLen, "MMC1 prg mem invalid address");
-                    return data->programMemory[address];
-                } else {
-                    u8 bank = data->prgBankReqister;
-                    u32 address = (addr - 0x8000) + (bank * 0x4000 /*16kb*/);
-                    ASSERT_MESSAGE(address < data->programMemoryLen, "MMC1 prg mem invalid address");
-                    return data->programMemory[address];
-                }
-
-            } break;
-        default:
-            ABORT("MMC1 unknown PRG ROM mode 0x%04X", prgRomMode);
-            break;
-    }
-
-    return 0;
+    u32 address =_mapper1_get_prg_addr(data, addr);
+    if(address == numeric_max_u32) ABORT("MMC1 prg mem invalid address 0x%04X", address);
+    return data->head.programMemory[address];
 }
 
 u8
@@ -163,7 +153,6 @@ mapper1_cpu_write(Mapper1Data* data, u16 addr, u8 val) {
     // clears the shift register to its initial state.
     if(val & 0x80) {
         // TODO set control?
-        //data->controlReqister |= 0xC;
 
         data->controlReqister |= 0xC;
         data->shiftReqister = 0x10;
@@ -202,16 +191,7 @@ mapper1_cpu_write(Mapper1Data* data, u16 addr, u8 val) {
                     break;
             }
         } else if(address_is_between(addr, MAP1_CHRBANK0_START, MAP1_CHRBANK0_END)) {
-#if 0
-            static int temp = 0;
-            temp += 1;
-            if(temp > 100) {
-                exit(1);
-            }
-            printf("0x%04X\n", data->shiftReqister);
-#endif
             data->chrBank0reqister = data->shiftReqister;
-
         } else if(address_is_between(addr, MAP1_CHRBANK1_START, MAP1_CHRBANK1_END)) {
             data->chrBank1reqister = data->shiftReqister;
         } else if(address_is_between(addr, MAP1_PRGBANK_START, MAP1_PRGBANK_END)) {
@@ -245,19 +225,19 @@ mapper1_ppu_read(Mapper1Data* data, u16 addr) {
         // ignore 0 bit
         u8 bank = data->chrBank0reqister & 0x1E;
         u16 address = (bank * 0x2000 /*8 kb*/) + addr;
-        ASSERT_MESSAGE(address < data->characterMemoryLen, "MMC1 prg mem invalid address");
-        return data->characterMemory[address];
+        ASSERT_MESSAGE(address < data->head.characterMemoryLen, "MMC1 prg mem invalid address");
+        return data->head.characterMemory[address];
         //4kb mode
     } else {
 
         if(addr < 0x1000) {
             u16 address = data->chrBank0reqister * 0x1000 /*4 kb*/ + addr;
-            ASSERT_MESSAGE(address < data->characterMemoryLen, "MMC1 prg mem invalid address");
-            return data->characterMemory[address];
+            ASSERT_MESSAGE(address < data->head.characterMemoryLen, "MMC1 prg mem invalid address");
+            return data->head.characterMemory[address];
         } else {
             u16 address = (data->chrBank1reqister * 0x1000 /*4 kb*/)  + (addr - 0x1000 /*4 kb*/);
-            ASSERT_MESSAGE(address < data->characterMemoryLen, "MMC1 prg mem invalid address");
-            return data->characterMemory[address];
+            ASSERT_MESSAGE(address < data->head.characterMemoryLen, "MMC1 prg mem invalid address");
+            return data->head.characterMemory[address];
         }
     }
 }
@@ -265,18 +245,19 @@ mapper1_ppu_read(Mapper1Data* data, u16 addr) {
 void
 mapper1_ppu_write(Mapper1Data* data, u16 addr, u8 val) {
 
-    ASSERT_MESSAGE(addr < data->characterMemoryLen, "invalid write in mmc1");
-    data->characterMemory[addr] = val;
+    ASSERT_MESSAGE(addr < data->head.characterMemoryLen, "invalid write in mmc1");
+    data->head.characterMemory[addr] = val;
 }
 
 struct Mapper mapper1 = {
-    .cpu_peak_cartridge     = (peak_func)mapper1_cpu_peak,
     .cpu_read_cartridge     = (cpu_read_func)mapper1_cpu_read,
     .cpu_write_cartridge    = (cpu_write_func)mapper1_cpu_write,
     .ppu_read_cartridge     = (ppu_read_func)mapper1_ppu_read,
     .ppu_write_cartridge    = (ppu_write_func)mapper1_ppu_write,
     .mapper_init            = (mapper_init_func)mapper1_init,
-    .mapper_dispose         = (mapper_dispose_func)mapper1_dispose
+    .mapper_dispose         = (mapper_dispose_func)mapper1_dispose,
+    .cpu_peak_cartridge     = (peak_func)mapper1_cpu_peak,
+    .mapper_disasseble      = (disasseble_func)mapper1_disassemble
 };
 
 #endif /* MMC1_H */

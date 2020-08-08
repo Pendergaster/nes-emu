@@ -13,22 +13,13 @@
 
 void
 mapper0_init(Mapper0Data* data, u8* progMem, u8* charMem) {
-
-    data->programMemory = calloc(cartridge.numProgramRoms, PROG_ROM_SINGLE_SIZE);
-    data->characterMemory = calloc(cartridge.numCharacterRoms, CHAR_ROM_SINGLE_SIZE);
-
-    memcpy(data->programMemory, progMem,
-            cartridge.numProgramRoms * PROG_ROM_SINGLE_SIZE);
-    memcpy(data->characterMemory, charMem,
-            cartridge.numCharacterRoms * CHAR_ROM_SINGLE_SIZE);
+    mapperheader_init(&data->head, progMem, charMem);
 }
 
 void
 mapper0_dispose(Mapper0Data* data) {
 
-    free(data->programMemory);
-    free(data->characterMemory);
-
+    mapperheader_dispose(&data->head);
     memset(data, 0 ,sizeof *data);
 }
 
@@ -42,10 +33,23 @@ mapper0_cpu_peak(Mapper0Data* data, u16 addr, u8* valid) {
     else
         addr &= 0x7FFF; // if 2 rom capasity is 32K
 
-    u8 ret = data->programMemory[addr];
+    u8 ret = data->head.programMemory[addr];
 
     if(valid) *valid = 1;
     return ret;
+}
+
+char*
+mapper0_disasseble(Mapper0Data* data, u16 addr) {
+
+    if(!address_is_between(addr, MAP0_START, MAP0_END)) return notKnownOperand;
+
+    if(cartridge.numProgramRoms == 1)
+        addr &= 0x3FFF; // if 1 rom capasity is 16K
+    else
+        addr &= 0x7FFF; // if 2 rom capasity is 32K
+
+    return disassemblytable_read(&data->head, addr);
 }
 
 u8
@@ -60,7 +64,7 @@ mapper0_cpu_read(Mapper0Data* data, u16 addr) {
     else
         addr &= 0x7FFF; // if 2 rom capasity is 32K
 
-    return data->programMemory[addr];
+    return data->head.programMemory[addr];
 }
 
 void
@@ -76,7 +80,7 @@ mapper0_cpu_write(Mapper0Data* data, u16 addr, u8 val) {
     else
         addr &= 0x7FFF; // if 2 rom capasity is 32K
 
-    data->programMemory[addr] = val;
+    data->head.programMemory[addr] = val;
 }
 
 u8
@@ -85,7 +89,7 @@ mapper0_ppu_read(Mapper0Data* data, u16 addr) {
     if(!address_is_between(addr, 0, MAP0_PPU_DATA_SIZE))
         ABORT("invalid address in mapper0 0x%04X", addr);
 
-    return data->characterMemory[addr];
+    return data->head.characterMemory[addr];
 }
 
 void
@@ -93,17 +97,19 @@ mapper0_ppu_write(Mapper0Data* data, u16 addr, u8 val) {
 
     if(!address_is_between(addr, 0, MAP0_PPU_DATA_SIZE)) ABORT("invalid address in mapper0");
 
-    data->characterMemory[addr] = val;
+    data->head.characterMemory[addr] = val;
 }
 
 struct Mapper mapper0 = {
-    .cpu_peak_cartridge     = (peak_func)mapper0_cpu_peak,
     .cpu_read_cartridge     = (cpu_read_func)mapper0_cpu_read,
     .cpu_write_cartridge    = (cpu_write_func)mapper0_cpu_write,
     .ppu_read_cartridge     = (ppu_read_func)mapper0_ppu_read,
     .ppu_write_cartridge    = (ppu_write_func)mapper0_ppu_write,
     .mapper_init            = (mapper_init_func)mapper0_init,
-    .mapper_dispose         = (mapper_dispose_func)mapper0_dispose
+    .mapper_dispose         = (mapper_dispose_func)mapper0_dispose,
+
+    .cpu_peak_cartridge     = (peak_func)mapper0_cpu_peak,
+    .mapper_disasseble      = (disasseble_func)mapper0_disasseble
 };
 
 #endif /* NROM_H */

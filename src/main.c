@@ -91,7 +91,6 @@ main(int argc, char** argv) {
 
         if(debug == 0) { //debug update
             if (frameSkip && step) {
-                LOG("FRAMESKIPPING");
                 do {
                     ppu_clock();
                     if(updateCounter % 3 == 0) {
@@ -113,7 +112,6 @@ main(int argc, char** argv) {
                 step = 0;
             } else if (step) {
                 if(step) {
-                    LOG("DEBUGGING");
                     u8 updated = 0;
                     do {
                         ppu_clock();

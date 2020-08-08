@@ -6,10 +6,12 @@
 #define CARTRIDGE_H
 
 #include "fileload.h"
-#include "mapperdata.h"
 
 #define PROG_ROM_SINGLE_SIZE    0x4000 // 16 K
 #define CHAR_ROM_SINGLE_SIZE    0x2000 // 8 K
+
+#include "mapperdata.h"
+
 #define TRAINER_SIZE            512
 
 // Because we dont know before hand which mapper will be used
@@ -38,20 +40,26 @@ typedef u8   (*ppu_read_func)(MapperData* /*data*/, u16 /*addr*/);
 typedef void (*ppu_write_func)(MapperData* /*data*/, u16 /*addr*/, u8 /*val*/);
 typedef void (*mapper_init_func)(MapperData* /*data*/, u8* progMem, u8* charMem);
 typedef void (*mapper_dispose_func)(MapperData* /*data*/);
+typedef char* (*disasseble_func)(MapperData* /*data*/, u16 /*addr*/);
 
 union MapperData {
     Mapper0Data mapper0;
-    Mapper1Data mapper1;
+    //Mapper1Data mapper1;
 };
 
 struct Mapper {
-    peak_func           cpu_peak_cartridge;
     cpu_read_func       cpu_read_cartridge;
     cpu_write_func      cpu_write_cartridge;
     ppu_read_func       ppu_read_cartridge;
     ppu_write_func      ppu_write_cartridge;
     mapper_init_func    mapper_init;
     mapper_dispose_func mapper_dispose;
+
+    /* debug utils */
+    peak_func           cpu_peak_cartridge;
+    disasseble_func     mapper_disasseble;
+
+    /* union of mapperdata */
     MapperData          data;
 } mapper;
 
@@ -138,9 +146,11 @@ cartridge_load(const char* name) {
         case 0:
             mapper = mapper0;
             break;
+
         case 1:
             mapper = mapper1;
             break;
+
         default:
             ABORT("NOT IMPLEMENTED MAPPER %d", cartridge.mapperID);
             break;
@@ -151,7 +161,7 @@ cartridge_load(const char* name) {
     free(to_free);
 }
 
-void
+static void
 cartridge_dispose() {
     if(mapper.mapper_dispose) mapper.mapper_dispose(&mapper.data);
 }
@@ -182,10 +192,20 @@ cartridge_ppu_read_rom(u16 addr) {
     return mapper.ppu_read_cartridge(&mapper.data, addr);
 }
 
-void
+static void
 cartridge_ppu_write_rom(u16 addr, u8 val) {
 
     mapper.ppu_write_cartridge(&mapper.data, addr, val);
+}
+
+static char*
+cartridge_read_disassembly(u16 addr) {
+
+    static char* err = "Impl TODO";
+    if(mapper.mapper_disasseble)
+        return mapper.mapper_disasseble(&mapper.data, addr);
+    else
+        return err;
 }
 
 #endif /* CARTRIDGE_H */

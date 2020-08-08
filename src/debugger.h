@@ -35,14 +35,69 @@ struct nk_image oamImage;
 struct nk_context *ctx;
 struct nk_colorf bg;
 
+#if 0
 char** disassemblyTable;
 static const u32 PROGMEM_SIZE = 0x10000 - 0x4020;
 
-//InstructionHashTable disassembly;
+InstructionHashTable disassembly;
+#endif
+
+static inline u32
+create_instruction_str(char* str, u32 addr) {
+
+    u8 opcode = bus_peak8(addr, NULL);
+    Instruction instruction = instructionTable[opcode];
+    u16 low = 0x0;
+    u16 high = 0x0;
+
+    u32 instLen = strlen(cpuInstructionStrings[opcode]);
+    memcpy(str ,cpuInstructionStrings[opcode], instLen);
+
+    str[instLen] = ' ';
+
+    u32 skip = 0;
+
+    if(instruction.addressMode == ABS ||                // fetch 2 addresses
+            instruction.addressMode == ABSX ||
+            instruction.addressMode == ABSY ||
+            instruction.addressMode == IND
+      ) {
+
+        skip++;
+        low = bus_peak8(addr + skip, NULL);
+
+        skip++;
+        high = bus_peak8(addr + skip, NULL);
+    }
+    else if( instruction.addressMode == IMP || // fetch 0 addresses
+            instruction.addressMode == ACCUM //||
+            //instruction.addressMode == IMM
+           )
+    {
+        str[instLen + 1] = 0;
+        return skip;
+    }
+    else // fetch low adress (1 address)
+    {
+        skip++;
+        low = bus_peak8(addr + skip, NULL); // TODO fix
+    }
+
+    u16 holeAddr = (high << 8) | low;
+    char temp[32];
+
+    sprintf(temp, "0x%04X", holeAddr);
+
+    int hexStringSize = strlen(temp) + 1;
+    memcpy(&str[instLen + 1], temp, hexStringSize);
+
+    return skip;
+}
 
 static void
 debugger_init(SDL_Window *win) {
 
+#if 0
     //instruction_hashtable_init(&disassembly, sizeof(char), hashmap_find_primeindex(PROGMEM_SIZE));
 
     disassemblyTable = calloc(PROGMEM_SIZE, sizeof(char *));
@@ -60,6 +115,8 @@ debugger_init(SDL_Window *win) {
 
         disassemblyTable[index] = disassembly;
     }
+
+#endif
 
     ctx = nk_sdl_init(win);
     /* Load Fonts: if none of these are loaded a default font will be used  */
@@ -189,7 +246,6 @@ instruction_label(InstructionLabel label, u16 wantedAddr) {
         int temp = 0;
         if(nk_selectable_label(ctx, reqString, NK_TEXT_LEFT, &temp)) {
             sprintf ( peekString,"%X", label.pos);
-            printf("pressed\n");
             peekLen = strlen(peekString);
         }
 
@@ -240,7 +296,7 @@ intruction_debugger() {
         }
     }
 
-    char* notKnownOperand = "Outside of PRG mem";
+    //char* notKnownOperand = "Outside of PRG mem";
     char* errOp = "ERR OP";
 
     InstructionLabel instructionCache[14 + 1 + 14] = {0};
@@ -250,55 +306,38 @@ intruction_debugger() {
 
     for(i32 i = 13; i >= 0; tempPC--) {
 
-        if( tempPC < 0x4020 ) {
-            instructionCache[i] =
-                (struct InstructionLabel) { .pos = tempPC, .instruction = notKnownOperand};
+        char* val = cartridge_read_disassembly(tempPC);
+
+        if (val && *val != '\0') {
+            instructionCache[i] = (struct InstructionLabel) {
+                .pos = tempPC, .instruction = val
+            };
             i -= 1;
-        } else {
-            u16 realAddr = tempPC - 0x4020; //mapper.cpu_translate_peak(tempPC); // TODO fix
-            if(disassemblyTable[realAddr]) {
-                instructionCache[i] = (struct InstructionLabel)
-                {
-                    .pos = tempPC, .instruction = disassemblyTable[realAddr]
-                };
-                i -= 1;
-            }
         }
     }
 
     tempPC = wantedAddr; // Current location
+    char* val = cartridge_read_disassembly(tempPC);
 
-    if( tempPC < 0x4020 ) {
-        instructionCache[14] =
-            (struct InstructionLabel) { .pos = tempPC, .instruction = notKnownOperand};
+    if (val && *val != '\0') {
+        instructionCache[14] = (struct InstructionLabel) {
+            .pos = tempPC, .instruction = val
+        };
     } else {
-        u16 realAddr = tempPC - 0x4020; // 0; //mapper.cpu_translate_peak(tempPC); TODO fix
-
-        if(disassemblyTable[realAddr]) {
-            instructionCache[14] =
-                (struct InstructionLabel) { .pos = tempPC, .instruction = disassemblyTable[realAddr]};
-        } else {
-            instructionCache[14] =
-                (struct InstructionLabel) { .pos = tempPC, .instruction = errOp};
-        }
+        instructionCache[14] =
+            (struct InstructionLabel) { .pos = tempPC, .instruction = errOp};
     }
 
     // down
     tempPC = wantedAddr + 1;
     for(u16 i = 15; i < 29; tempPC++) {
 
-        if( tempPC < 0x4020 ) {
-            instructionCache[i] =
-                (struct InstructionLabel) { .pos = tempPC, .instruction = notKnownOperand};
+        char* val = cartridge_read_disassembly(tempPC);
+        if (val && *val != '\0') {
+            instructionCache[i] = (struct InstructionLabel) {
+                .pos = tempPC, .instruction = val
+            };
             i += 1;
-        } else {
-
-            u16 realAddr = tempPC - 0x4020;
-            if(disassemblyTable[realAddr]) {
-                instructionCache[i] =
-                    (struct InstructionLabel) { .pos = tempPC, .instruction = disassemblyTable[realAddr]};
-                i += 1;
-            }
         }
     }
 
@@ -396,7 +435,6 @@ nametable_debugger() {
             //nk_label(ctx, tableIdString, NK_TEXT_LEFT);
 
             if(nk_selectable_label(ctx, tableIdString, NK_TEXT_LEFT, &selected)) {
-                //LOG("Attrinute table 0x0%X", y * 32 + x);
                 selectedAttribute = selected ? (y * 32 + x) : numeric_max_u32;
                 selectedAttributeValue = selected ?
                     ppu.nameTables[(NAMETABLE_SIZE * (active ^ 1)) + (y + 30) * 32 + x] : 0;
@@ -579,9 +617,7 @@ debugger_update() {
         spacePressed = 0;
         if(nk_window_has_focus(ctx)) {
             debug ^= 1;
-            LOG("DEBUG SET");
         } else {
-            LOG("GAME FOCUCED");
             nk_window_set_focus(ctx, "Game view");
         }
     }
