@@ -7,7 +7,7 @@ Project uses OpenGL rendering and [Nulkear](https://github.com/Immediate-Mode-UI
 Some basic memory mappers are implemented and more might be coming. Emulator is in basic working stage, not all features are impleneted.
 Currently is build as an unity build and only has linux build. Windows could be done following the build.sh logic
 
-#Images
+##Images
 
 Nest test rom.
 ![image1](nesemudemo.png)
