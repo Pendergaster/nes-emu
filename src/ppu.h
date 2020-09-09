@@ -721,6 +721,7 @@ ppu_clock() {
 #if 1
         u8 zeroIndexRendered = 0;
 
+        //bgPixel = 0, bgPalette = 0;
         if(ppu.maskReq & ShowSprites) {
 
             for(u8 i = 0; i < ppu.oam.numSpritesFound; i++) {
@@ -1000,14 +1001,18 @@ ppu_render_oam() { // there is 2 pattern tables so this is 0 or 1
 
         for(u16 tileX = 0; tileX < 8; tileX++) { // FOR TILE X
 
-            //if(data[(tileY * 8) + tileX].yPos >= 240 /*|| data[(tileY * 8) + tileX].attributes == 0*/) {
+            u32 spriteIndex = (tileY * 8) + tileX;
+
+            LOG("sprite index 0x%04X", spriteIndex);
+
+            //if(data[(tileY * 8) + tileX].yPos >= 240 || data[(tileY * 8) + tileX].attributes == 0) {
             //    continue;
             //}
 
-            u8 palette = (data[(tileY * 8) + tileX].attributes &
-                    (SpritePaletteLow | SpritePaletteHigh)) + 4;
+            u8 palette = (data[spriteIndex].attributes & (SpritePaletteLow | SpritePaletteHigh)) + 4;
 
-            u16 tileoffset = data[(tileY * 8) + tileX].tileIndex * 16;
+            u16 addressOffset = data[spriteIndex].tileIndex & 0x1 ?  0x1000 : 0;
+            u16 tileoffset = data[spriteIndex].tileIndex * 16 + addressOffset;
 
             for(u16 pixelY = 0; pixelY < TILE_DIM; pixelY++) { // FOR PIXEL Y
 

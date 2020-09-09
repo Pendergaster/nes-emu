@@ -20,6 +20,7 @@ const u32 SCREEN_WIDTH = 1800, SCREEN_HEIGHT = 1000;
 #include "ppu.h"
 #include "input.h"
 #include "debugger.h"
+#include "apu.h"
 
 SDL_Window *window;
 
@@ -49,6 +50,8 @@ initialize(char* rom) {
 
     assert(window);
     SDL_GL_CreateContext(window);
+
+    apu_init();
 
     // Load cartridge, init cpu, ppu and gamepad
     cartridge_load(rom);
@@ -90,6 +93,7 @@ main(int argc, char** argv) {
         running = keystate_update();
 
         if(debug == 0) { //debug update
+#if 0
             if (frameSkip && step) {
                 do {
                     ppu_clock();
@@ -111,6 +115,8 @@ main(int argc, char** argv) {
                 ppu.frameComplete = 0;
                 step = 0;
             } else if (step) {
+
+#endif
                 if(step) {
                     u8 updated = 0;
                     do {
@@ -133,7 +139,10 @@ main(int argc, char** argv) {
                     } while(updated != 1);
                     step = 0;
                 }
+
+#if 0
             }
+#endif
         } else { //normal update
 
             currentTime = SDL_GetTicks();

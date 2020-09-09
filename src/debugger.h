@@ -175,7 +175,7 @@ memory_debugger() {
     }
     nk_layout_row_end(ctx);
 
-    nk_layout_row_static(ctx, 25, 30, 0x11);
+    nk_layout_row_static(ctx, 20, 32, 0x11);
     nk_label(ctx, "", NK_TEXT_LEFT);
     // show 0x0F adresses
     char hexString[8];
@@ -223,7 +223,7 @@ instruction_label(InstructionLabel label, u16 wantedAddr) {
             peekLen = strlen(peekString);
         }
 
-        nk_label_colored(ctx, label.instruction, NK_TEXT_LEFT, nk_rgb(0, 0, 200));
+        nk_label_colored(ctx, label.instruction, NK_TEXT_LEFT, nk_rgb(200, 0, 0));
 
     } else if(cpu.pc == label.pos) {
 
@@ -240,7 +240,7 @@ instruction_label(InstructionLabel label, u16 wantedAddr) {
         int temp = 1;
         nk_selectable_label(ctx, reqString, NK_TEXT_LEFT, &temp);
         //nk_label_colored(ctx, reqString, NK_TEXT_LEFT, nk_rgb(200, 0, 0));
-        nk_label_colored(ctx, label.instruction, NK_TEXT_LEFT, nk_rgb(200, 0, 0));
+        nk_label_colored(ctx, label.instruction, NK_TEXT_LEFT, nk_rgb(0, 0, 200));
     } else {
 
         int temp = 0;
@@ -254,12 +254,55 @@ instruction_label(InstructionLabel label, u16 wantedAddr) {
     }
 }
 
+int step = 0;
+
+//frameSkip = 0;
+
 static void
 intruction_debugger() {
 
+    char temp[32];
+    char res[64];
+    create_instruction_str(temp, cpu.pc);
+
+    sprintf(res, "Current: %s", temp);
+
+    nk_layout_row_dynamic(ctx, 50, 1);
+
+    nk_label(ctx, res, NK_TEXT_LEFT);
+
+    nk_layout_row_static(ctx, 30, 80, 1);
+
+    if(nk_button_label(ctx, "Reset")) {
+        cpu_reset();
+    }
+
+    if(!debug) {
+        if(nk_button_label(ctx, "Step")) {
+            step = 1;
+        }
+        if(nk_button_label(ctx, "Continue")) {
+            debug = 1;
+        }
+    } else {
+        if(nk_button_label(ctx, "Debug")) {
+            debug = 0;
+        }
+    }
+
+    //if(nk_checkbox_label(ctx, "Debug", &debug)) {
+    //    frameSkip = 0;
+    //}
+
+#if 0
+    if(nk_checkbox_label(ctx, "FrameSkip", &frameSkip)) {
+        debug = 0;
+    }
+#endif
+
     float ratio[] = {120, 150};
     nk_layout_row(ctx, NK_STATIC, 25, 2, ratio);
-    nk_label(ctx, "Hex:", NK_TEXT_LEFT);
+    nk_label(ctx, "View value:", NK_TEXT_LEFT);
     nk_edit_string(ctx, NK_EDIT_SIMPLE, peekString, &peekLen, 5, nk_filter_hex);
     peekString[peekLen] = 0;
     u16 wantedAddr = cpu.pc;
@@ -281,6 +324,7 @@ intruction_debugger() {
             breakpoint = 0x10000;
         }
     }
+#if 0
     {
         nk_layout_row(ctx, NK_STATIC, 25, 2, ratio);
         static char breakString[64] = "0";
@@ -295,7 +339,7 @@ intruction_debugger() {
             instructionCountBreakPoint = 0;
         }
     }
-
+#endif
     //char* notKnownOperand = "Outside of PRG mem";
     char* errOp = "ERR OP";
 
@@ -507,9 +551,21 @@ oam_view() {
 
     nk_layout_space_end(ctx);
 
+    nk_layout_row_static(ctx, 15, 500, 1);
+
+    char temp[64];
+
+    OAMData* data = (OAMData*)ppu.oam.primary; // TODO fix pointer cast
+
+    for(u32 i = 0; i < 64; i++) {
+
+        sprintf(temp, "Num: 0x%04X Tile: 0x%04X Attributes: 0x%04X X: 0x%04X Y: 0x%04X",
+                i, data[i].tileIndex, data[i].attributes, data[i].xPos, data[i].yPos);
+        nk_label(ctx, temp, NK_TEXT_LEFT);
+    }
+
 }
 
-int step = 0, frameSkip = 0;
 static void
 debugger_update() {
 
@@ -541,31 +597,7 @@ debugger_update() {
 
     if (nk_begin(ctx, "Side Bar", nk_rect((SCREEN_WIDTH * 0.75), 0, (SCREEN_WIDTH * 0.25), SCREEN_HEIGHT), windowFlags)) {
 
-        nk_layout_row_static(ctx, 70, 120, 1);
 
-        char temp[32];
-        create_instruction_str(temp, cpu.pc);
-        nk_label(ctx, temp, NK_TEXT_LEFT);
-
-        nk_layout_row_static(ctx, 30, 80, 1);
-
-        if(!debug) {
-            if(nk_button_label(ctx, "Step")) {
-                step = 1;
-            }
-        }
-
-        if(nk_button_label(ctx, "Reset")) {
-            cpu_reset();
-        }
-
-        if(nk_checkbox_label(ctx, "Debug", &debug)) {
-            frameSkip = 0;
-        }
-
-        if(nk_checkbox_label(ctx, "FrameSkip", &frameSkip)) {
-            debug = 0;
-        }
         intruction_debugger();
     }
 
