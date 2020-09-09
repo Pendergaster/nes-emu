@@ -13,7 +13,7 @@ Currently is build as an unity build and only has linux build. Windows could be 
 
 # Images
 
-Nest test rom.
+Nestest rom for testing 6502 processor.
 ![image1](nesemudemo.png)
 
 Gameplay visualisation for [Nova The Squirrel](https://github.com/NovaSquirrel/NovaTheSquirrel)
