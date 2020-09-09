@@ -9,7 +9,7 @@ This is not intended to be used as actual platform to play games.
 
 Project uses OpenGL rendering and [Nulkear](https://github.com/Immediate-Mode-UI/Nuklear) library for GUI.
 Some basic memory mappers are implemented and more might be coming. Emulator is in basic working stage, not all features are impleneted.
-Currently is build as an unity build and only has linux build. Windows could be done following the build.sh logic
+Currently is build as an unity build and only has linux/unix version. Windows could be done following the build.sh logic
 
 # Images
 
